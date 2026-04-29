@@ -1,10 +1,10 @@
 # buyer demo
 
-A small Node script that pays the figpay API autonomously using x402 — the
+A small Node script that pays the figlet API autonomously using x402 — the
 "agent side" of the agentic-economy demo.
 
 It does what an AI agent would do:
-1. Calls `GET /figlet?text=…`
+1. Calls `GET /figlet/render?text=…`
 2. Receives `HTTP 402` with payment instructions
 3. Signs a USDC transfer from a test wallet
 4. Retries with the `X-PAYMENT` header
@@ -28,14 +28,14 @@ testnet USDC. **Do not reuse a real wallet.**
 3. Fund the address with **Base Sepolia USDC** from the Circle faucet:
    https://faucet.circle.com (select Base Sepolia, USDC).
 
-4. Make sure the figpay server is running and `PAY_TO` is set to a different
-   address than the buyer's.
+4. Make sure the umbrella server is running and `PAY_TO` is set to a
+   different address than the buyer's.
 
 ## Run
 
 ```bash
 export BUYER_PRIVATE_KEY=0x...
-export FIGPAY_URL=http://localhost:4021     # or https://figpay.dcprevere.com
+export X402_URL=http://localhost:4021       # or https://x402.dcprevere.com
 npm run buyer -- "hello agent economy"
 ```
 
@@ -44,10 +44,10 @@ Optional: `FONT=Slant` (defaults to `Slant`).
 You should see:
 ```
 buyer: 0xabc...
-GET http://localhost:4021/figlet?text=hello%20agent%20economy&font=Slant
+GET http://localhost:4021/figlet/render?text=hello%20agent%20economy&font=Slant
 paid: { ... settlement details ... }
-    __         ____    
-   / /_  ___  / / /___ 
+    __         ____
+   / /_  ___  / / /___
   ...
 ```
 

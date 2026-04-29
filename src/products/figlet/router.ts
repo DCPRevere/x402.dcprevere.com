@@ -1,50 +1,12 @@
 import express, { type Request, type Response, type NextFunction } from "express";
 import { capture } from "../../core/analytics.js";
-import { listFonts, render, type Fonts } from "./render.js";
+import { listFonts, render } from "./render.js";
+import { validateFigletInput, type ValidatedFigletInput } from "./validate.js";
 import type { Product } from "../../core/product.js";
 
-const MAX_TEXT_LEN = 256;
-const MIN_WIDTH = 20;
-const MAX_WIDTH = 200;
+const SLUG = "figlet";
 
-let allowedFonts: Set<string> | null = null;
-function fontAllowed(name: string): boolean {
-  if (!allowedFonts) allowedFonts = new Set(listFonts());
-  return allowedFonts.has(name);
-}
-
-export interface ValidatedFigletInput {
-  text: string;
-  font: Fonts;
-  width: number | undefined;
-}
-
-export function validateFigletInput(query: Request["query"]):
-  | { ok: true; value: ValidatedFigletInput }
-  | { ok: false; status: number; error: string } {
-  const text = typeof query.text === "string" ? query.text : "";
-  if (!text) return { ok: false, status: 400, error: "text query parameter is required" };
-  if (text.length > MAX_TEXT_LEN)
-    return { ok: false, status: 400, error: `text must be <= ${MAX_TEXT_LEN} characters` };
-
-  const font = (typeof query.font === "string" && query.font ? query.font : "Standard") as Fonts;
-  if (!fontAllowed(font))
-    return { ok: false, status: 400, error: `unknown font: ${font} — see GET /figlet/fonts` };
-
-  let width: number | undefined;
-  if (typeof query.width === "string" && query.width !== "") {
-    const n = Number(query.width);
-    if (!Number.isInteger(n))
-      return { ok: false, status: 400, error: "width must be an integer" };
-    if (n < MIN_WIDTH || n > MAX_WIDTH)
-      return { ok: false, status: 400, error: `width must be in [${MIN_WIDTH}, ${MAX_WIDTH}]` };
-    width = n;
-  }
-
-  return { ok: true, value: { text, font, width } };
-}
-
-export function validateMiddleware(req: Request, res: Response, next: NextFunction) {
+function validateMiddleware(req: Request, res: Response, next: NextFunction) {
   const result = validateFigletInput(req.query);
   if (!result.ok) {
     res.status(result.status).type("text/plain").send(result.error + "\n");
@@ -55,12 +17,12 @@ export function validateMiddleware(req: Request, res: Response, next: NextFuncti
 }
 
 /**
- * App-level pre-validator: only runs validation on the paid render path,
- * so it returns 400 *before* the paywall sees the request. Other figlet
- * routes (/figlet, /figlet/fonts) pass through untouched.
+ * Pre-validator mounted under `/figlet` (so `req.path` is post-strip).
+ * Only runs validation on the paid render path so it returns 400 *before*
+ * the paywall sees the request. Other figlet routes (/, /fonts) pass through.
  */
 export function figletPreValidator(req: Request, res: Response, next: NextFunction) {
-  if (req.path === "/figlet/render") {
+  if (req.path === "/render") {
     return validateMiddleware(req, res, next);
   }
   next();
@@ -80,7 +42,7 @@ async function renderHandler(_req: Request, res: Response) {
     ).analytics?.distinctId;
     if (distinctId) {
       capture(distinctId, "product_rendered", {
-        product: "figlet",
+        product: SLUG,
         font: input.font,
         text_length: input.text.length,
         output_lines: out.split("\n").length,
@@ -133,12 +95,12 @@ export function figletRouter(): express.Router {
 }
 
 export const figletProduct: Product = {
-  slug: "figlet",
+  slug: SLUG,
   description: "Render text in a figfont (ASCII-art banners).",
   paidRoutes: [
     {
       method: "GET",
-      path: "/figlet/render",
+      path: `/${SLUG}/render`,
       price: "$0.10",
       description: "Render text in a figfont. $0.10 per call.",
     },

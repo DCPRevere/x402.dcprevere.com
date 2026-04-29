@@ -1,5 +1,14 @@
 # figpay — plan
 
+> **Status (post-implementation):** the product shipped, but as the
+> `figlet` slug under the umbrella `x402.dcprevere.com` host rather than as
+> a standalone `figpay.dcprevere.com` subdomain. Routes are now
+> `/figlet/render`, `/figlet/fonts`, etc. (not `/figlet`, `/fonts`). The
+> `figlet_rendered` PostHog event is emitted as `product_rendered`. Sections
+> below describing per-product Dockerfiles / standalone deploy / single-route
+> mounts are historical — see the umbrella [`README.md`](../README.md) and
+> [`figpay/README.md`](./README.md) for the actual shape.
+
 ## Context
 
 We want to demonstrate what the agentic economy looks like with a tiny, real

@@ -21,7 +21,7 @@ signs a USDC transfer from its wallet, retries, and gets the result.
 ## Try the paywall (no payment, just see the 402)
 
 ```bash
-curl -i 'https://figpay.dcprevere.com/figlet?text=hello'
+curl -i 'https://x402.dcprevere.com/figlet/render?text=hello'
 ```
 
 You'll get back `HTTP 402 Payment Required` with a `PAYMENT-REQUIRED` header
@@ -29,7 +29,7 @@ containing base64-encoded payment instructions: scheme, network, USDC
 amount, recipient address, expiry. Decode it:
 
 ```bash
-curl -s -i 'https://figpay.dcprevere.com/figlet?text=hi' \
+curl -s -i 'https://x402.dcprevere.com/figlet/render?text=hi' \
   | awk -F': ' '/^PAYMENT-REQUIRED/{print $2}' \
   | base64 -d \
   | jq
@@ -39,23 +39,24 @@ curl -s -i 'https://figpay.dcprevere.com/figlet?text=hi' \
 
 The repo includes a small Node script using [`@x402/fetch`][fetch] that
 behaves like an agent: it pays and prints the rendered output. See
-[`buyer/README.md`](./buyer/README.md) for the full runbook (test wallet,
+[`buyer/README.md`](../buyer/README.md) for the full runbook (test wallet,
 faucets).
 
 ```bash
 export BUYER_PRIVATE_KEY=0x...
-export FIGPAY_URL=https://figpay.dcprevere.com
+export X402_URL=https://x402.dcprevere.com
 npm run buyer -- "hello agent economy"
 ```
 
 ## Routes
 
-| Route                                    | Paid?     | Returns                              |
-| ---------------------------------------- | --------- | ------------------------------------ |
-| `GET /`                                  | free      | this page (text/plain)               |
-| `GET /healthz`                           | free      | `{"ok":true}`                        |
-| `GET /fonts`                             | free      | JSON list of figfont names           |
-| `GET /figlet?text=…&font=…&width=…`      | **$0.10** | `text/plain` ASCII rendering         |
+| Route                                              | Paid?     | Returns                              |
+| -------------------------------------------------- | --------- | ------------------------------------ |
+| `GET /`                                            | free      | umbrella landing page (text/plain)   |
+| `GET /healthz`                                     | free      | `{"ok":true}`                        |
+| `GET /figlet`                                      | free      | figlet product info page             |
+| `GET /figlet/fonts`                                | free      | JSON list of figfont names           |
+| `GET /figlet/render?text=…&font=…&width=…`         | **$0.10** | `text/plain` ASCII rendering         |
 
 Validation runs *before* the paywall, so an invalid request returns `400`,
 never `402` — buyers don't pay for bad input.
@@ -64,7 +65,8 @@ never `402` — buyers don't pay for bad input.
 
 ```bash
 cp .env.example .env
-# edit .env: set PAY_TO to your Sepolia wallet address
+# edit .env: set PAY_TO to your Sepolia wallet address (the server refuses
+# to start on the zero address)
 npm install
 npm run dev
 ```
@@ -73,7 +75,7 @@ Then:
 
 ```bash
 curl localhost:4021/healthz
-curl 'localhost:4021/figlet?text=hi'   # → 402, with payment instructions
+curl 'localhost:4021/figlet/render?text=hi'   # → 402, with payment instructions
 ```
 
 ## Configuration
@@ -83,10 +85,12 @@ curl 'localhost:4021/figlet?text=hi'   # → 402, with payment instructions
 | `PORT`            | `4021`                               |                                       |
 | `NETWORK`         | `eip155:84532` (Base Sepolia)        | CAIP-2; mainnet is `eip155:8453`      |
 | `FACILITATOR_URL` | `https://x402.org/facilitator`       | Free for testnet; CDP for mainnet     |
-| `PAY_TO`          | (required)                           | Seller wallet address                 |
-| `PRICE`           | `$0.10`                              | Leading `$` required by x402          |
+| `PAY_TO`          | **required, no default**             | Seller wallet address; zero address is rejected |
 | `POSTHOG_KEY`     | (unset)                              | Analytics is a no-op when unset       |
 | `POSTHOG_HOST`    | `https://eu.i.posthog.com`           |                                       |
+
+Per-route prices are declared in code (see `src/products/figlet/router.ts`),
+not env, so the umbrella server can host products at different price points.
 
 ## Mainnet flip (real money)
 
@@ -108,14 +112,25 @@ No code changes.
 - [`@x402/express`][x402-express] for the paywall, [`@x402/fetch`][fetch]
   for the buyer
 - `posthog-node` for the funnel: `request_received → payment_required_sent
-  → payment_settled → figlet_rendered`
+  → payment_settled → product_rendered` (joined on the hashed payer address)
 
 ## Tests
 
 ```bash
-npm test          # vitest: validator + render
-npm run typecheck # tsc --noEmit on the whole project
+npm test               # vitest run — full suite
+npm run test:watch     # vitest in watch mode
+npm run test:coverage  # v8 coverage with an 80% threshold (lines/branches/funcs)
+npm run typecheck      # tsc --noEmit on the whole project
 ```
+
+The suite covers:
+- `validate.ts` — pure validator (text/font/width branches).
+- `render.ts` — figlet wrapper renders & lists fonts.
+- `config.ts` — env validation rejects unset, malformed, and zero `PAY_TO`; CAIP-2 enforcement.
+- `analytics.ts` — `hashPayer` stable + case-insensitive; no-op when `POSTHOG_KEY` is unset.
+- `analytics-middleware.ts` — payer address extraction from `X-PAYMENT`, stable `distinct_id` across paid retries, status-code → event mapping (402 / 400 / 5xx / 2xx-with-payment).
+- `server.ts` (HTTP via supertest) — free routes, validation-before-paywall, paywall fires.
+- `router.ts` — `renderHandler` emits `product_rendered` analytics with the right shape.
 
 Manual end-to-end (requires a funded Sepolia wallet):
 

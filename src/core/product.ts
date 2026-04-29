@@ -5,15 +5,18 @@ import type { Router, RequestHandler } from "express";
  * The umbrella server merges all products' paidRoutes into one paymentMiddleware
  * call, then mounts each product's router.
  *
- * preValidators run app-level *before* the paywall so a request with bad
- * input returns 400 without ever reaching 402 — buyers don't pay for invalid
- * requests.
+ * preValidators run *before* the paywall so a request with bad input returns
+ * 400 without ever reaching 402 — buyers don't pay for invalid requests.
  */
 export interface Product {
   slug: string;
   description: string;
   paidRoutes: PaidRoute[];
-  /** Optional middlewares mounted before the paywall, scoped to /<slug>. */
+  /**
+   * Optional middlewares mounted under `/<slug>` and run before the paywall.
+   * `req.path` inside these has the slug prefix stripped, so a validator for
+   * a paid `/<slug>/render` route checks `req.path === "/render"`.
+   */
   preValidators?: RequestHandler[];
   router(): Router;
 }
