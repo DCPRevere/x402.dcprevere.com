@@ -118,8 +118,7 @@ x402.dcprevere.com/
 │   │   └── config.ts
 │   └── products/
 │       ├── graphics/
-│       │   ├── figlet/           # /graphics/figlet — live
-│       │   └── figpay/           # historical pitch / mainnet-flip notes
+│       │   └── figlet/           # /graphics/figlet — live
 │       ├── random/               # /random — live
 │       └── passport/             # /passport — live
 ├── buyer/                        # autonomous-buyer demo CLI
@@ -129,8 +128,16 @@ x402.dcprevere.com/
 ## Network
 
 All products default to **Base Sepolia** (testnet, free, no signup) via
-the open `https://x402.org/facilitator`. Mainnet is a config flip — see
-[`src/products/graphics/figpay/README.md`](./src/products/graphics/figpay/README.md#mainnet-flip-real-money).
+the open `https://x402.org/facilitator`. Mainnet is a config flip:
+
+1. Set `NETWORK=eip155:8453`.
+2. Set `FACILITATOR_URL=https://api.cdp.coinbase.com/platform/v2/x402`
+   and the `CDP_API_KEY_ID` / `CDP_API_KEY_SECRET` env vars (sign up at
+   [Coinbase Developer Platform][cdp]).
+3. Set `PAY_TO` to a real wallet you control on Base mainnet.
+4. Redeploy.
+
+No code changes.
 
 ## Configuration
 

@@ -1,7 +1,7 @@
 {
   "name": "x402-dcprevere-com",
   "version": "0.1.0",
-  "description": "Umbrella server hosting pay-per-call x402 demo APIs. figpay (figlet) is the first product.",
+  "description": "Umbrella server hosting pay-per-call x402 demo APIs.",
   "private": true,
   "type": "module",
   "engines": {
