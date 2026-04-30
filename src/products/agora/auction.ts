@@ -9,6 +9,7 @@ import {
   createAuction,
   getAuction,
   setAuctionState,
+  cancelAuctionIfBidding,
   placeBid,
   getBid,
   listBids,
@@ -314,12 +315,52 @@ export function attestationFor(auction: AuctionRow) {
   return { claim, signature: signClaim(claim) };
 }
 
+/**
+ * Cancel an auction. Free, but the seller proves authorship by including
+ * their seller wallet in the body. There is no on-chain verification of
+ * who's calling, so the cancel attestation is most useful when the contract
+ * downstream is gating on (a) the right wallet and (b) the cancel signature.
+ *
+ * Cancelling is only permitted while still in the bidding phase. Once the
+ * bid window closes, the auction must be finalized (or left to expire as
+ * "no winner").
+ */
+function cancelHandler(req: Request, res: Response) {
+  const auction = getAuction(req.params.id);
+  if (!auction) {
+    res.status(404).json({ error: "no such auction" });
+    return;
+  }
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const seller = typeof body.seller === "string" ? body.seller : "";
+  if (!isAddress(seller)) {
+    res.status(400).json({ error: "seller must be a 0x-prefixed 20-byte hex address" });
+    return;
+  }
+  if (seller.toLowerCase() !== auction.seller) {
+    res.status(403).json({ error: "only the seller may cancel this auction" });
+    return;
+  }
+  if (auction.state !== "bidding") {
+    res.status(400).json({ error: `auction is ${auction.state}, can only cancel during bidding` });
+    return;
+  }
+  const updated = cancelAuctionIfBidding(auction.id);
+  if (!updated) {
+    res.status(409).json({ error: "auction state changed during cancel" });
+    return;
+  }
+  log.info("auction_cancelled", { id: updated.id, seller: updated.seller });
+  res.status(200).json({ auction: updated });
+}
+
 export function auctionRouter(): express.Router {
   const router = express.Router();
   router.post("/create", createHandler);
   router.post("/:id/bid", bidHandler);
   router.post("/:id/reveal", revealHandler);
   router.post("/:id/finalize", finalizeHandler);
+  router.post("/:id/cancel", cancelHandler);
   router.get("/:id", getHandler);
   return router;
 }

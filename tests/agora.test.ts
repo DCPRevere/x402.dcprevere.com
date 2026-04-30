@@ -346,6 +346,51 @@ describe("/agora", () => {
       expect(state.body.auction.state).toBe("bidding");
     });
 
+    describe("cancel", () => {
+      it("seller can cancel during bidding", async () => {
+        const app = freshApp();
+        const auc = await request(app).post("/agora/auction/create").send(validAuction());
+        const id = auc.body.auction.id;
+        const res = await request(app).post(`/agora/auction/${id}/cancel`).send({ seller: SELLER });
+        expect(res.status).toBe(200);
+        expect(res.body.auction.state).toBe("cancelled");
+      });
+
+      it("rejects cancel from non-seller", async () => {
+        const app = freshApp();
+        const auc = await request(app).post("/agora/auction/create").send(validAuction());
+        const id = auc.body.auction.id;
+        const res = await request(app).post(`/agora/auction/${id}/cancel`).send({ seller: ALICE });
+        expect(res.status).toBe(403);
+      });
+
+      it("rejects cancel after bid window closes", async () => {
+        const app = freshApp();
+        const auc = await request(app).post("/agora/auction/create").send(validAuction());
+        const id = auc.body.auction.id;
+        // Move clock past bid_deadline AND advance state via reveal trigger.
+        setClockForTesting(() => new Date("2030-06-15T00:00:00Z"));
+        // Calling reveal will flip bidding → revealing.
+        await request(app)
+          .post(`/agora/auction/${id}/reveal`)
+          .send({ bidder: ALICE, amount_usdc: "5000", salt: "x" });
+        const res = await request(app).post(`/agora/auction/${id}/cancel`).send({ seller: SELLER });
+        expect(res.status).toBe(400);
+      });
+
+      it("after cancel, no further bids accepted", async () => {
+        const app = freshApp();
+        const auc = await request(app).post("/agora/auction/create").send(validAuction());
+        const id = auc.body.auction.id;
+        await request(app).post(`/agora/auction/${id}/cancel`).send({ seller: SELLER });
+        const c = bidCommitment("5000", "s", ALICE);
+        const bid = await request(app)
+          .post(`/agora/auction/${id}/bid`)
+          .send({ bidder: ALICE, commitment: c });
+        expect(bid.status).toBe(400);
+      });
+    });
+
     it("hides the bid book during the bidding phase, exposes during reveal", async () => {
       const app = freshApp();
       const auc = await request(app).post("/agora/auction/create").send(validAuction());

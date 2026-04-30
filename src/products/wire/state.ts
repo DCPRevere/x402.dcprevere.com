@@ -178,6 +178,20 @@ export function countQueued(inboxId: string): number {
 }
 
 /**
+ * Read up to `max` queued messages WITHOUT marking them delivered. Lets the
+ * owner inspect what's in the queue (decide whether to drain, audit senders,
+ * etc.) without committing to a poll.
+ */
+export function peekMessages(inboxId: string, max: number): MessageRow[] {
+  return getDb()
+    .prepare(
+      `SELECT * FROM wire_messages WHERE inbox_id = ? AND state = 'queued'
+        ORDER BY queued_at ASC LIMIT ?`,
+    )
+    .all(inboxId, max) as MessageRow[];
+}
+
+/**
  * Drain up to `max` queued messages atomically. The SELECT + UPDATE runs in a
  * single transaction so two concurrent pollers can't both claim the same
  * rows. Each row is moved from `queued` to `delivered` and returned.

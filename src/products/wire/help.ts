@@ -73,6 +73,24 @@ export const wireHelp: ProductHelpInput = {
       examples: [{ request: "POST /wire/inbox/<id>/poll  (Header: X-Wire-Owner-Token: <token>)" }],
     },
     {
+      slug: "peek",
+      name: "wire/inbox/:id/peek",
+      description:
+        "Read queued messages WITHOUT marking them delivered. Owner-authed. Use to " +
+        "inspect senders / amounts / content before deciding to drain. Same auth as poll.",
+      tags: ["messaging", "free"],
+      status: "live",
+      last_modified: LAST_MODIFIED,
+      input: {
+        params: [
+          { name: "max", type: "int", required: false, default: 100, doc: "Max messages to peek at (1..100)." },
+        ],
+      },
+      pricing: { kind: "free" },
+      output: { media_types: ["application/json"] },
+      examples: [{ request: "GET /wire/inbox/<id>/peek?max=10  (Header: X-Wire-Owner-Token: <token>)" }],
+    },
+    {
       slug: "close",
       name: "wire/inbox/:id/close",
       description: "Close an inbox. Future sends are rejected with 410 Gone.",

@@ -97,8 +97,11 @@ export const randomHelp: ProductHelpInput = {
       slug: "seal",
       name: "random/seal",
       description:
-        "Submit ciphertext plus an unlock condition (block height, ISO timestamp, or USDC " +
-        "deposit threshold). The key is released when the condition fires.",
+        "Submit ciphertext with a time-lock (block_height or ISO timestamp). The unlock " +
+        "key is released by GET /random/seal/<id> as soon as the condition fires. " +
+        "Note: the legacy `deposit` unlock_kind is parked as experimental — there is no " +
+        "deposit endpoint yet, so a deposit-sealed payload will never unlock. Use " +
+        "block_height or timestamp.",
       tags: ["randomness", "time-lock", "paid"],
       status: "live",
       last_modified: LAST_MODIFIED,
@@ -109,10 +112,12 @@ export const randomHelp: ProductHelpInput = {
             name: "unlock_kind",
             type: "enum",
             required: true,
-            values: ["block_height", "timestamp", "deposit"],
-            doc: "Trigger family.",
+            values: ["block_height", "timestamp"],
+            doc:
+              "Trigger family. `deposit` is technically accepted by the validator for " +
+              "back-compat but currently has no deposit-recording endpoint.",
           },
-          { name: "unlock_value", type: "string", required: true, doc: "Block number, ISO timestamp, or USDC amount." },
+          { name: "unlock_value", type: "string", required: true, doc: "Block number or ISO timestamp." },
         ],
       },
       pricing: { kind: "flat", amount: "50000", amount_usdc: "0.05" },

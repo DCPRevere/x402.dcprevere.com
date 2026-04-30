@@ -8,7 +8,8 @@ export const agoraHelp: ProductHelpInput = {
     "The public square. Three sub-surfaces share the slot: a paid pinboard (`/board`), " +
     "a sealed-bid auction (`/auction`), and a paid chatroom (`/bar`). Each demonstrates a " +
     "different paid-economy primitive — coordination signals, price discovery, and ambient " +
-    "talk.",
+    "talk. The auction emits signed result attestations but does NOT settle funds — see " +
+    "/agora/auction/create for the disclaimer.",
   tags: ["primitive", "social", "auction", "marketplace"],
   status: "live",
   last_modified: LAST_MODIFIED,
@@ -52,7 +53,11 @@ export const agoraHelp: ProductHelpInput = {
       description:
         "Open a sealed-bid auction. The auction proceeds in three phases: bidding " +
         "(commitments only), revealing (preimages opened), finalize (server picks the " +
-        "highest valid revealed bid and emits a signed result attestation).",
+        "highest valid revealed bid and emits a signed result attestation). " +
+        "IMPORTANT: this is a price-DISCOVERY primitive, not a settlement primitive. " +
+        "The server attests to who won and at what amount; it does not collect or " +
+        "transfer the winning_bid_usdc. A downstream settlement contract or trusted " +
+        "intermediary must honour the attestation to actually move funds.",
       tags: ["auction", "paid"],
       status: "live",
       last_modified: LAST_MODIFIED,
@@ -115,6 +120,25 @@ export const agoraHelp: ProductHelpInput = {
       pricing: { kind: "free" },
       output: { media_types: ["application/json"] },
       examples: [{ request: "POST /agora/auction/<id>/reveal { bidder, amount_usdc, salt }" }],
+    },
+    {
+      slug: "auction/cancel",
+      name: "agora/auction/:id/cancel",
+      description:
+        "Seller-only: cancel an auction while still in the bidding phase. Free. " +
+        "Pass the seller wallet in the body — must match the auction's seller. Once " +
+        "the bid window closes, cancel returns 400; finalize is the only exit.",
+      tags: ["auction", "free"],
+      status: "live",
+      last_modified: LAST_MODIFIED,
+      input: {
+        params: [
+          { name: "seller", type: "address", required: true, doc: "Must equal the auction's seller wallet." },
+        ],
+      },
+      pricing: { kind: "free" },
+      output: { media_types: ["application/json"] },
+      examples: [{ request: "POST /agora/auction/<id>/cancel { seller }" }],
     },
     {
       slug: "auction/finalize",

@@ -5,11 +5,14 @@ const LAST_MODIFIED = "2026-04-30T00:00:00Z";
 export const escrowHelp: ProductHelpInput = {
   name: "escrow",
   description:
-    "Conditional value attestations. A buyer locks an escrow against a recipient and " +
-    "a release condition (block height, timestamp, passport binding, or revealed commit). " +
-    "When the condition fires, anyone can trigger release; otherwise the buyer can refund " +
-    "after the deadline. Server emits HMAC-signed receipts that downstream contracts can " +
-    "honour.",
+    "Conditional ATTESTATION, not on-chain settlement. The server records buyer, " +
+    "recipient, amount_usdc, condition, and deadline; on release/refund it emits an " +
+    "HMAC-signed receipt naming the resolution. NO USDC IS HELD OR MOVED BY THIS SERVER. " +
+    "A downstream settlement contract that trusts this server's signing key can honour " +
+    "the receipt to actually transfer funds; without one, the attestation is a record " +
+    "of what 'should have happened' rather than what did. Suitable for: trust-anchored " +
+    "demos, optimistic settlement with an on-chain dispute window, or as a primitive " +
+    "behind a contract that wraps the receipt.",
   tags: ["primitive", "escrow", "attestation", "paid"],
   status: "live",
   last_modified: LAST_MODIFIED,

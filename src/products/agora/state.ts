@@ -190,6 +190,19 @@ export function setAuctionState(id: string, state: AuctionState): AuctionRow | n
   return getAuction(id);
 }
 
+/**
+ * Atomically cancel an auction iff it's still in the bidding phase. Returns
+ * the updated row, or null if the auction has already advanced (or doesn't
+ * exist).
+ */
+export function cancelAuctionIfBidding(id: string): AuctionRow | null {
+  const result = getDb()
+    .prepare(`UPDATE agora_auctions SET state = 'cancelled' WHERE id = ? AND state = 'bidding'`)
+    .run(id);
+  if (result.changes === 0) return null;
+  return getAuction(id);
+}
+
 export function placeBid(input: {
   auction_id: string;
   bidder: string;

@@ -242,4 +242,68 @@ describe("/wire", () => {
       expect(res.status).toBe(401);
     });
   });
+
+  describe("peek", () => {
+    it("requires the owner token", async () => {
+      const app = freshApp();
+      const { id } = await makeInbox(app);
+      const res = await request(app).get(`/wire/inbox/${id}/peek`);
+      expect(res.status).toBe(401);
+    });
+
+    it("returns queued messages without dequeuing them", async () => {
+      const app = freshApp();
+      const { id, token } = await makeInbox(app);
+      await request(app).post(`/wire/inbox/${id}/send`).send({ from: SENDER, body: "first" });
+      await request(app).post(`/wire/inbox/${id}/send`).send({ from: SENDER, body: "second" });
+
+      const peek1 = await request(app)
+        .get(`/wire/inbox/${id}/peek`)
+        .set("X-Wire-Owner-Token", token);
+      expect(peek1.status).toBe(200);
+      expect(peek1.body.messages.length).toBe(2);
+      expect(peek1.body.queued).toBe(2);
+
+      // Peek doesn't consume — second peek returns the same messages.
+      const peek2 = await request(app)
+        .get(`/wire/inbox/${id}/peek`)
+        .set("X-Wire-Owner-Token", token);
+      expect(peek2.body.messages.length).toBe(2);
+      expect(peek2.body.queued).toBe(2);
+
+      // A subsequent poll DOES consume.
+      const drain = await request(app)
+        .post(`/wire/inbox/${id}/poll`)
+        .set("X-Wire-Owner-Token", token)
+        .send({});
+      expect(drain.body.messages.length).toBe(2);
+
+      const peek3 = await request(app)
+        .get(`/wire/inbox/${id}/peek`)
+        .set("X-Wire-Owner-Token", token);
+      expect(peek3.body.messages.length).toBe(0);
+    });
+
+    it("respects ?max", async () => {
+      const app = freshApp();
+      const { id, token } = await makeInbox(app);
+      for (let i = 0; i < 5; i++) {
+        await request(app).post(`/wire/inbox/${id}/send`).send({ from: SENDER, body: `m${i}` });
+      }
+      const peek = await request(app)
+        .get(`/wire/inbox/${id}/peek?max=2`)
+        .set("X-Wire-Owner-Token", token);
+      expect(peek.body.messages.length).toBe(2);
+      expect(peek.body.queued).toBe(5);
+    });
+
+    it("rejects max outside 1..100", async () => {
+      const app = freshApp();
+      const { id, token } = await makeInbox(app);
+      const a = await request(app)
+        .get(`/wire/inbox/${id}/peek?max=0`)
+        .set("X-Wire-Owner-Token", token);
+      expect(a.status).toBe(400);
+    });
+  });
 });

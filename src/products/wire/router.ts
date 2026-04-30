@@ -10,6 +10,7 @@ import {
   enqueueMessage,
   countQueued,
   pollMessages,
+  peekMessages,
 } from "./state.js";
 import { wireHelp } from "./help.js";
 import type { Product } from "../../core/product.js";
@@ -138,6 +139,31 @@ function pollHandler(req: Request, res: Response) {
   res.json({ messages, remaining: countQueued(inbox.id) });
 }
 
+function peekHandler(req: Request, res: Response) {
+  const token = readOwnerToken(req);
+  if (!token) {
+    res.status(401).json({ error: "missing or malformed X-Wire-Owner-Token" });
+    return;
+  }
+  const inbox = authenticateOwner(req.params.id, token);
+  if (!inbox) {
+    res.status(403).json({ error: "owner token does not authenticate this inbox" });
+    return;
+  }
+  const maxQ = req.query.max;
+  let max = MAX_POLL_BATCH;
+  if (typeof maxQ === "string" && maxQ !== "") {
+    const n = Number(maxQ);
+    if (!Number.isInteger(n) || n < 1 || n > MAX_POLL_BATCH) {
+      res.status(400).json({ error: `max must be an integer in [1, ${MAX_POLL_BATCH}]` });
+      return;
+    }
+    max = n;
+  }
+  const messages = peekMessages(inbox.id, max);
+  res.json({ messages, queued: countQueued(inbox.id) });
+}
+
 function closeHandler(req: Request, res: Response) {
   const token = readOwnerToken(req);
   if (!token) {
@@ -168,6 +194,7 @@ export function wireRouter(): express.Router {
   router.get("/inbox/:id", getInboxHandler);
   router.post("/inbox/:id/send", sendHandler);
   router.post("/inbox/:id/poll", pollHandler);
+  router.get("/inbox/:id/peek", peekHandler);
   router.post("/inbox/:id/close", closeHandler);
   return router;
 }
