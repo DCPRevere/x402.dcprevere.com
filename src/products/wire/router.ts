@@ -1,4 +1,6 @@
 import express, { type Request, type Response, type NextFunction } from "express";
+import { isAddress } from "../../core/addr.js";
+import { log } from "../../core/log.js";
 import {
   ensureWireTables,
   createInbox,
@@ -31,38 +33,41 @@ function readOwnerToken(req: Request): string | null {
 /**
  * Runs at the app level before the paywall. Currently only the send endpoint
  * is paid; the rest are free. We pre-validate the send body so a buyer never
- * pays $0.005 for a malformed message.
+ * pays $0.005 for a malformed message, and stash the parsed input on
+ * res.locals so the handler isn't a duplicate parser.
  */
 export function wirePreValidator(req: Request, res: Response, next: NextFunction) {
-  // Path arrives without the /wire prefix because preValidators are mounted
-  // under the product slug.
   const sendMatch = req.path.match(/^\/inbox\/([^/]+)\/send$/);
-  if (req.method === "POST" && sendMatch) {
-    if (!req.body || typeof req.body !== "object") {
-      res.status(400).json({ error: "JSON body required" });
-      return;
-    }
-    const body = req.body as Record<string, unknown>;
-    const from = typeof body.from === "string" ? body.from : "";
-    const messageBody = typeof body.body === "string" ? body.body : "";
-    if (!/^0x[0-9a-fA-F]{40}$/.test(from)) {
-      res.status(400).json({ error: "from must be a 0x-prefixed 20-byte hex address" });
-      return;
-    }
-    if (!messageBody || Buffer.byteLength(messageBody, "utf8") > MAX_BODY_BYTES) {
-      res.status(400).json({ error: `body required, max ${MAX_BODY_BYTES} bytes` });
-      return;
-    }
-    const inbox = getInboxPublic(sendMatch[1]);
-    if (!inbox) {
-      res.status(404).json({ error: "no such inbox" });
-      return;
-    }
-    if (inbox.state !== "open") {
-      res.status(410).json({ error: `inbox is ${inbox.state}` });
-      return;
-    }
+  if (req.method !== "POST" || !sendMatch) return next();
+
+  if (!req.body || typeof req.body !== "object") {
+    res.status(400).json({ error: "JSON body required" });
+    return;
   }
+  const body = req.body as Record<string, unknown>;
+  const from = typeof body.from === "string" ? body.from : "";
+  const messageBody = typeof body.body === "string" ? body.body : "";
+  const reply_to = typeof body.reply_to === "string" ? body.reply_to : undefined;
+
+  if (!isAddress(from)) {
+    res.status(400).json({ error: "from must be a 0x-prefixed 20-byte hex address" });
+    return;
+  }
+  if (!messageBody || Buffer.byteLength(messageBody, "utf8") > MAX_BODY_BYTES) {
+    res.status(400).json({ error: `body required, max ${MAX_BODY_BYTES} bytes` });
+    return;
+  }
+  const inbox = getInboxPublic(sendMatch[1]);
+  if (!inbox) {
+    res.status(404).json({ error: "no such inbox" });
+    return;
+  }
+  if (inbox.state !== "open") {
+    res.status(410).json({ error: `inbox is ${inbox.state}` });
+    return;
+  }
+
+  res.locals.wireSend = { inboxId: inbox.id, from, body: messageBody, reply_to };
   next();
 }
 
@@ -71,11 +76,12 @@ export function wirePreValidator(req: Request, res: Response, next: NextFunction
 function createInboxHandler(req: Request, res: Response) {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const owner_wallet = typeof body.owner_wallet === "string" ? body.owner_wallet : "";
-  if (!/^0x[0-9a-fA-F]{40}$/.test(owner_wallet)) {
+  if (!isAddress(owner_wallet)) {
     res.status(400).json({ error: "owner_wallet must be a 0x-prefixed 20-byte hex address" });
     return;
   }
   const result = createInbox({ owner_wallet });
+  log.debug("wire_inbox_created", { id: result.inbox.id, owner: result.inbox.owner_wallet });
   res.status(201).json({ inbox: result.inbox, owner_token: result.owner_token });
 }
 
@@ -92,31 +98,18 @@ function getInboxHandler(req: Request, res: Response) {
   });
 }
 
-function sendHandler(req: Request, res: Response) {
-  const inbox = getInboxPublic(req.params.id);
-  if (!inbox) {
-    res.status(404).json({ error: "no such inbox" });
+function sendHandler(_req: Request, res: Response) {
+  const input = res.locals.wireSend;
+  if (!input) {
+    res.status(500).json({ error: "internal: validator did not run" });
     return;
   }
-  if (inbox.state !== "open") {
-    res.status(410).json({ error: `inbox is ${inbox.state}` });
-    return;
-  }
-  const body = (req.body ?? {}) as Record<string, unknown>;
-  const from = typeof body.from === "string" ? body.from : "";
-  const messageBody = typeof body.body === "string" ? body.body : "";
-  const reply_to = typeof body.reply_to === "string" ? body.reply_to : undefined;
-
-  if (!/^0x[0-9a-fA-F]{40}$/.test(from)) {
-    res.status(400).json({ error: "from must be a 0x-prefixed 20-byte hex address" });
-    return;
-  }
-  if (!messageBody || Buffer.byteLength(messageBody, "utf8") > MAX_BODY_BYTES) {
-    res.status(400).json({ error: `body required, max ${MAX_BODY_BYTES} bytes` });
-    return;
-  }
-
-  const message = enqueueMessage({ inbox_id: inbox.id, sender: from, body: messageBody, reply_to });
+  const message = enqueueMessage({
+    inbox_id: input.inboxId,
+    sender: input.from,
+    body: input.body,
+    reply_to: input.reply_to,
+  });
   res.status(201).json({ message: { id: message.id, queued_at: message.queued_at } });
 }
 
@@ -161,6 +154,7 @@ function closeHandler(req: Request, res: Response) {
     return;
   }
   const closed = closeInbox(inbox.id);
+  log.info("wire_inbox_closed", { id: inbox.id });
   res.status(200).json({ inbox: closed });
 }
 
@@ -169,7 +163,6 @@ function closeHandler(req: Request, res: Response) {
 export function wireRouter(): express.Router {
   ensureWireTables();
   const router = express.Router();
-  router.use(express.json({ limit: "16kb" }));
 
   router.post("/inbox", createInboxHandler);
   router.get("/inbox/:id", getInboxHandler);

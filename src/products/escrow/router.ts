@@ -1,5 +1,8 @@
 import express, { type Request, type Response, type NextFunction } from "express";
 import { signClaim } from "../../core/sign.js";
+import { isAddress, isUuidV4 } from "../../core/addr.js";
+import { isFuture, parseTimestamp } from "../../core/time.js";
+import { log } from "../../core/log.js";
 import {
   ensureEscrowTables,
   createEscrow,
@@ -18,6 +21,7 @@ import {
   type ConditionContext,
 } from "./conditions.js";
 import { escrowHelp } from "./help.js";
+import type { ParsedEscrowCreate } from "./locals.js";
 import type { Product } from "../../core/product.js";
 
 const SLUG = "escrow";
@@ -38,18 +42,8 @@ export function resetContextProviderForTesting(): void {
 
 // ----- Validation -----------------------------------------------------
 
-interface ParsedCreate {
-  buyer: string;
-  recipient: string;
-  amount_usdc: string;
-  condition_kind: EscrowConditionKind;
-  condition_value: string;
-  deadline: string;
-  memo?: string;
-}
-
-function parseCreateBody(body: Record<string, unknown>):
-  | { ok: true; value: ParsedCreate }
+export function parseCreateBody(body: Record<string, unknown>):
+  | { ok: true; value: ParsedEscrowCreate }
   | { ok: false; error: string } {
   const buyer = typeof body.buyer === "string" ? body.buyer : "";
   const recipient = typeof body.recipient === "string" ? body.recipient : "";
@@ -60,10 +54,10 @@ function parseCreateBody(body: Record<string, unknown>):
   const deadline = typeof body.deadline === "string" ? body.deadline : "";
   const memoRaw = body.memo;
 
-  if (!/^0x[0-9a-fA-F]{40}$/.test(buyer)) {
+  if (!isAddress(buyer)) {
     return { ok: false, error: "buyer must be a 0x-prefixed 20-byte hex address" };
   }
-  if (!/^0x[0-9a-fA-F]{40}$/.test(recipient)) {
+  if (!isAddress(recipient)) {
     return { ok: false, error: "recipient must be a 0x-prefixed 20-byte hex address" };
   }
   if (buyer.toLowerCase() === recipient.toLowerCase()) {
@@ -84,11 +78,10 @@ function parseCreateBody(body: Record<string, unknown>):
   if (!validateConditionValue(condition_kind, condition_value)) {
     return { ok: false, error: `condition_value malformed for kind ${condition_kind}` };
   }
-  const deadlineMs = Date.parse(deadline);
-  if (!Number.isFinite(deadlineMs)) {
+  if (!parseTimestamp(deadline)) {
     return { ok: false, error: "deadline must be an ISO 8601 timestamp" };
   }
-  if (deadlineMs <= Date.now()) {
+  if (!isFuture(deadline)) {
     return { ok: false, error: "deadline must be in the future" };
   }
   let memo: string | undefined;
@@ -109,12 +102,11 @@ function validateConditionValue(kind: EscrowConditionKind, value: string): boole
     case "block_height":
       return /^\d+$/.test(value);
     case "timestamp":
-      return Number.isFinite(Date.parse(value));
+      return parseTimestamp(value) !== null;
     case "passport_binding":
       return parsePassportSelector(value) !== null;
     case "commit_revealed":
-      // UUID v4 format expected.
-      return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+      return isUuidV4(value);
   }
 }
 
@@ -131,19 +123,20 @@ export function escrowPreValidator(req: Request, res: Response, next: NextFuncti
     res.status(400).json({ error: parsed.error });
     return;
   }
-  (res.locals as { escrowCreate?: ParsedCreate }).escrowCreate = parsed.value;
+  res.locals.escrowCreate = parsed.value;
   next();
 }
 
 // ----- Handlers -------------------------------------------------------
 
 function createHandler(_req: Request, res: Response) {
-  const input = (res.locals as { escrowCreate?: ParsedCreate }).escrowCreate;
+  const input = res.locals.escrowCreate;
   if (!input) {
     res.status(500).json({ error: "internal: validator did not run" });
     return;
   }
   const row = createEscrow(input);
+  log.debug("escrow_created", { id: row.id, buyer: row.buyer, recipient: row.recipient });
   res.status(201).json({ escrow: row });
 }
 
@@ -175,7 +168,7 @@ function getHandler(req: Request, res: Response) {
 
 function listByBuyerHandler(req: Request, res: Response) {
   const wallet = req.params.wallet;
-  if (!/^0x[0-9a-fA-F]{40}$/.test(wallet)) {
+  if (!isAddress(wallet)) {
     res.status(400).json({ error: "wallet must be a 0x-prefixed 20-byte hex address" });
     return;
   }
@@ -184,7 +177,7 @@ function listByBuyerHandler(req: Request, res: Response) {
 
 function listByRecipientHandler(req: Request, res: Response) {
   const wallet = req.params.wallet;
-  if (!/^0x[0-9a-fA-F]{40}$/.test(wallet)) {
+  if (!isAddress(wallet)) {
     res.status(400).json({ error: "wallet must be a 0x-prefixed 20-byte hex address" });
     return;
   }
@@ -209,11 +202,11 @@ async function releaseHandler(req: Request, res: Response) {
   }
   const updated = markReleased(row.id, result.detail);
   if (!updated) {
-    // Race: another caller flipped the row between read and write.
     res.status(409).json({ error: "escrow no longer open" });
     return;
   }
   const attestation = signEscrowAttestation(updated, "release");
+  log.info("escrow_released", { id: updated.id, detail: result.detail });
   res.status(200).json({ escrow: updated, attestation });
 }
 
@@ -228,7 +221,8 @@ async function refundHandler(req: Request, res: Response) {
     return;
   }
   const ctx = await contextProvider();
-  if (Date.parse(row.deadline) > ctx.now.getTime()) {
+  const deadline = parseTimestamp(row.deadline);
+  if (deadline && deadline.ms > ctx.now.getTime()) {
     res.status(400).json({
       error: "deadline has not passed",
       detail: `now ${ctx.now.toISOString()} < deadline ${row.deadline}`,
@@ -241,6 +235,7 @@ async function refundHandler(req: Request, res: Response) {
     return;
   }
   const attestation = signEscrowAttestation(updated, "refund");
+  log.info("escrow_refunded", { id: updated.id, deadline: updated.deadline });
   res.status(200).json({ escrow: updated, attestation });
 }
 
@@ -257,15 +252,29 @@ interface EscrowAttestation {
   signature: string;
 }
 
+/**
+ * Discriminated subtype: an escrow that has actually resolved. Encodes the
+ * "row.resolved_at and row.resolution are non-null" invariant in the type so
+ * `signEscrowAttestation` doesn't need non-null assertions.
+ */
+type ResolvedEscrow = EscrowRow & { resolved_at: string; resolution: string };
+
+function isResolved(row: EscrowRow): row is ResolvedEscrow {
+  return row.resolved_at !== null && row.resolution !== null;
+}
+
 function signEscrowAttestation(row: EscrowRow, resolution: "release" | "refund"): EscrowAttestation {
+  if (!isResolved(row)) {
+    throw new Error(`signEscrowAttestation: escrow ${row.id} is not resolved (state=${row.state})`);
+  }
   const claim = {
     escrow_id: row.id,
     buyer: row.buyer,
     recipient: row.recipient,
     amount_usdc: row.amount_usdc,
     resolution,
-    resolved_at: row.resolved_at!,
-    detail: row.resolution!,
+    resolved_at: row.resolved_at,
+    detail: row.resolution,
   };
   return { claim, signature: signClaim(claim) };
 }

@@ -1,7 +1,7 @@
-import crypto from "node:crypto";
 import type { Express, Request, Response, NextFunction } from "express";
 import { config } from "./config.js";
 import { SUPPORTED_NETWORKS } from "./networks.js";
+import { canonicalJson, etagFor } from "./json.js";
 
 /**
  * Fractal /help system.
@@ -182,7 +182,22 @@ class HelpRegistry {
   private umbrellaDescription =
     "Pay-per-call APIs for the agentic economy. Each product charges in USDC on Base via x402.";
   private umbrellaTags = ["umbrella", "x402"];
-  private umbrellaLastModified = new Date().toISOString();
+
+  /**
+   * Derived at resolve time so the umbrella's last_modified reflects the
+   * latest registered product. Without this, etag-based clients would never
+   * invalidate after a deploy that only bumps a single product's
+   * last_modified — the umbrella would still report its module-load time.
+   */
+  private get umbrellaLastModified(): string {
+    let latest = "1970-01-01T00:00:00Z";
+    for (const product of this.products.values()) {
+      if (product.input.last_modified > latest) {
+        latest = product.input.last_modified;
+      }
+    }
+    return latest === "1970-01-01T00:00:00Z" ? new Date().toISOString() : latest;
+  }
 
   /** Idempotent: re-registering the same mountPath replaces the prior input. */
   registerProduct(input: ProductHelpInput, mountPath: string): void {
@@ -460,26 +475,10 @@ function nodeOrDescendantsTouched(node: ResolvedHelp, since: Date): boolean {
   return node.children.some((c) => nodeOrDescendantsTouched(c, since));
 }
 
-/** Stable, sorted-key JSON serialization so etags don't drift on map iteration order. */
-export function canonicalJson(value: unknown): string {
-  return JSON.stringify(sortKeys(value));
-}
-
-function sortKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortKeys);
-  if (value && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const k of Object.keys(value as Record<string, unknown>).sort()) {
-      out[k] = sortKeys((value as Record<string, unknown>)[k]);
-    }
-    return out;
-  }
-  return value;
-}
-
-export function etagFor(json: string): string {
-  return `"${crypto.createHash("sha256").update(json).digest("hex")}"`;
-}
+// canonicalJson + etagFor moved to core/json.ts so /core/sign can depend on
+// JSON canonicalisation without pulling in the entire help registry. Re-
+// exported here for backward compatibility with the test suite.
+export { canonicalJson, etagFor } from "./json.js";
 
 // ----- Path classification ----------------------------------------------
 

@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { canonicalJson } from "./help.js";
+import { canonicalJson } from "./json.js";
 
 /**
  * Server-issued attestation MACs.

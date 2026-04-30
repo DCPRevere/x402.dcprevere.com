@@ -1,7 +1,14 @@
+// Side-effect import: registers the Express.Locals module augmentation so
+// res.locals.<key> is typed across all handlers. Must be imported before
+// any other module that reads res.locals.
+import "./core/locals.js";
+
 import express, { type Express } from "express";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { config } from "./core/config.js";
+import { log } from "./core/log.js";
+import { errBody, codes } from "./core/errors.js";
 import { buildLandingHandler, healthHandler } from "./core/landing.js";
 import { buildPaymentMiddleware } from "./core/payment.js";
 import { analyticsMiddleware } from "./core/analytics-middleware.js";
@@ -120,6 +127,19 @@ export function buildApp(productList: Product[] = products): Express {
     app.use(`/${product.slug}`, product.router());
   }
 
+  // Last-line error handler. Logs the failure, emits the structured error
+  // envelope (core/errors.ts), and shields the client from Express's default
+  // HTML stack trace.
+  app.use(((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    const message = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack?.split("\n").slice(0, 5).join("\n") : undefined;
+    log.error("unhandled_error", { route: req.path, method: req.method, message, stack });
+    if (res.headersSent) return;
+    res.status(500).type("application/json").send(
+      JSON.stringify(errBody({ code: codes.internal, message: "internal error" })),
+    );
+  }) as express.ErrorRequestHandler);
+
   return app;
 }
 
@@ -130,16 +150,15 @@ const isEntry = import.meta.url === `file://${process.argv[1]}`;
 if (isEntry) {
   const app = buildApp();
   const server = app.listen(config.port, () => {
-    // eslint-disable-next-line no-console
-    console.log(
-      `x402.dcprevere.com listening on :${config.port} ` +
-        `(network=${config.network}, products=${products.map((p) => p.slug).join(",")})`,
-    );
+    log.info("server_started", {
+      port: config.port,
+      network: config.network,
+      products: products.map((p) => p.slug),
+    });
   });
 
   const gracefulShutdown = async (signal: string) => {
-    // eslint-disable-next-line no-console
-    console.log(`received ${signal}, shutting down`);
+    log.info("server_shutdown", { signal });
     server.close();
     await shutdownAnalytics();
     process.exit(0);

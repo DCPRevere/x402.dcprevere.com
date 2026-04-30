@@ -17,6 +17,8 @@ import {
 } from "./draw.js";
 import { getBlockHash } from "../../core/chain.js";
 import { isFuture } from "../../core/time.js";
+import { isAddress, parseHex32 } from "../../core/addr.js";
+import { log } from "../../core/log.js";
 import { validateDrawInput } from "./validate-draw.js";
 import {
   ensureRandomTables,
@@ -169,10 +171,8 @@ function commitCreateHandler(req: Request, res: Response) {
   const deadline = typeof body.deadline === "string" ? body.deadline : "";
   const label = typeof body.label === "string" ? body.label : undefined;
 
-  // Strip optional 0x prefix, then require exactly 64 hex chars (32 bytes).
-  // Fixes review item #3.
-  const commitmentClean = commitment.replace(/^0x/, "");
-  if (!/^[0-9a-fA-F]{64}$/.test(commitmentClean)) {
+  const commitmentClean = parseHex32(commitment);
+  if (!commitmentClean) {
     res.status(400).json({ error: "commitment must be 32 bytes of hex (with optional 0x prefix)" });
     return;
   }
@@ -182,7 +182,7 @@ function commitCreateHandler(req: Request, res: Response) {
   }
 
   const row = createCommit({
-    commitment: commitmentClean.toLowerCase(),
+    commitment: commitmentClean,
     deadline,
     label,
   });
@@ -288,7 +288,7 @@ function sortitionCreateHandler(req: Request, res: Response) {
 function sortitionRegisterHandler(req: Request, res: Response) {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const wallet = typeof body.wallet === "string" ? body.wallet : "";
-  if (!/^0x[0-9a-fA-F]{40}$/.test(wallet)) {
+  if (!isAddress(wallet)) {
     res.status(400).json({ error: "wallet must be a 0x-prefixed 20-byte hex address" });
     return;
   }
@@ -344,6 +344,11 @@ async function sortitionDrawHandler(req: Request, res: Response) {
     seed = await sortitionSeedFor(pool.draw_at_block);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "seed source unavailable";
+    log.warn("sortition_seed_unavailable", {
+      pool: pool.id,
+      draw_at_block: pool.draw_at_block,
+      message: msg,
+    });
     res.status(503).json({
       error: "could not derive draw seed",
       detail: msg,

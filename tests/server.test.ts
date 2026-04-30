@@ -85,4 +85,13 @@ describe("umbrella server (HTTP)", () => {
       expect(free.status).toBe(200);
     });
   });
+
+  describe("error envelope", () => {
+    it("404 for unknown product is JSON-shaped", async () => {
+      const res = await request(app).get("/no-such-product/help");
+      // /help middleware handles missing nodes with its own 404 envelope.
+      expect(res.status).toBe(404);
+      expect(res.body.error).toBeDefined();
+    });
+  });
 });

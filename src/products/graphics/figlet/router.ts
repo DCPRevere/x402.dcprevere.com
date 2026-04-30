@@ -1,7 +1,8 @@
 import express, { type Request, type Response, type NextFunction } from "express";
 import { capture } from "../../../core/analytics.js";
+import { log } from "../../../core/log.js";
 import { listFonts, render } from "./render.js";
-import { validateFigletInput, type ValidatedFigletInput } from "./validate.js";
+import { validateFigletInput } from "./validate.js";
 import type { Product } from "../../../core/product.js";
 import { figletHelp } from "./help.js";
 
@@ -13,7 +14,7 @@ function validateMiddleware(req: Request, res: Response, next: NextFunction) {
     res.status(result.status).type("text/plain").send(result.error + "\n");
     return;
   }
-  (res.locals as { figletInput?: ValidatedFigletInput }).figletInput = result.value;
+  res.locals.figletInput = result.value;
   next();
 }
 
@@ -30,7 +31,7 @@ export function figletPreValidator(req: Request, res: Response, next: NextFuncti
 }
 
 async function renderHandler(_req: Request, res: Response) {
-  const input = (res.locals as { figletInput?: ValidatedFigletInput }).figletInput;
+  const input = res.locals.figletInput;
   if (!input) {
     res.status(500).type("text/plain").send("internal: validator did not run\n");
     return;
@@ -38,9 +39,7 @@ async function renderHandler(_req: Request, res: Response) {
   try {
     const startedAt = Date.now();
     const out = await render(input);
-    const distinctId = (
-      res.locals as { analytics?: { distinctId: string } }
-    ).analytics?.distinctId;
+    const distinctId = res.locals.analytics?.distinctId;
     if (distinctId) {
       capture(distinctId, "product_delivered", {
         product: SLUG,
@@ -53,6 +52,7 @@ async function renderHandler(_req: Request, res: Response) {
     res.type("text/plain").send(out);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "render failed";
+    log.error("figlet_render_failed", { font: input.font, text_length: input.text.length, message: msg });
     res.status(500).type("text/plain").send(`render error: ${msg}\n`);
   }
 }

@@ -333,3 +333,8 @@ export function countBarLinesBySpeakerSince(speaker: string, sinceIso: string): 
     .get(speaker.toLowerCase(), sinceIso) as { n: number };
   return row.n;
 }
+
+export function totalBarLines(): number {
+  const row = getDb().prepare(`SELECT COUNT(*) AS n FROM agora_bar_lines`).get() as { n: number };
+  return row.n;
+}

@@ -1,5 +1,8 @@
 import express, { type Request, type Response } from "express";
 import { signClaim } from "../../core/sign.js";
+import { isAddress } from "../../core/addr.js";
+import { isExpired } from "../../core/time.js";
+import { log } from "../../core/log.js";
 import {
   ensurePassportTables,
   insertBinding,
@@ -50,7 +53,7 @@ async function bindHandler(req: Request, res: Response) {
   const anchor_kind = body.anchor_kind;
   const anchor_value = typeof body.anchor_value === "string" ? body.anchor_value : "";
 
-  if (!/^0x[0-9a-fA-F]{40}$/.test(wallet)) {
+  if (!isAddress(wallet)) {
     res.status(400).json({ error: "wallet must be a 0x-prefixed 20-byte hex address" });
     return;
   }
@@ -79,13 +82,18 @@ async function bindHandler(req: Request, res: Response) {
   };
   const signature = signClaim(claim);
   const row = insertBinding({ ...claim, signature });
+  log.debug("passport_binding_issued", {
+    wallet: row.wallet,
+    anchor_kind: row.anchor_kind,
+    verified: row.verified,
+  });
 
   res.status(201).json({ binding: row, detail: result.detail });
 }
 
 function bindGetHandler(req: Request, res: Response) {
   const wallet = req.params.wallet;
-  if (!/^0x[0-9a-fA-F]{40}$/.test(wallet)) {
+  if (!isAddress(wallet)) {
     res.status(400).json({ error: "wallet must be a 0x-prefixed 20-byte hex address" });
     return;
   }
@@ -106,7 +114,7 @@ function captchaChallengeHandler(req: Request, res: Response) {
         ? Number(difficultyRaw)
         : 18;
 
-  if (!/^0x[0-9a-fA-F]{40}$/.test(wallet)) {
+  if (!isAddress(wallet)) {
     res.status(400).json({ error: "wallet must be a 0x-prefixed 20-byte hex address" });
     return;
   }
@@ -136,7 +144,7 @@ function captchaSolveHandler(req: Request, res: Response) {
     res.status(400).json({ error: `challenge is ${chal.state}` });
     return;
   }
-  if (Date.parse(chal.expires_at) < Date.now()) {
+  if (isExpired(chal.expires_at)) {
     res.status(400).json({ error: "challenge expired" });
     return;
   }
@@ -162,7 +170,7 @@ function captchaSolveHandler(req: Request, res: Response) {
 
 function passesGetHandler(req: Request, res: Response) {
   const wallet = req.params.wallet;
-  if (!/^0x[0-9a-fA-F]{40}$/.test(wallet)) {
+  if (!isAddress(wallet)) {
     res.status(400).json({ error: "wallet must be a 0x-prefixed 20-byte hex address" });
     return;
   }

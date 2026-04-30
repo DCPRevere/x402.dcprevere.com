@@ -2,9 +2,11 @@
 // module load, and stub network calls to the x402 facilitator so the
 // paywall test path is fully offline / deterministic.
 
-// NODE_ENV=test gates the rate limiter and any other prod-only middleware
-// so tests can hammer endpoints without flaking.
+// NODE_ENV=test gates the rate limiter, structured logger, and any other
+// prod-only middleware so tests can hammer endpoints without flaking and
+// log lines don't pollute test output.
 process.env.NODE_ENV = "test";
+process.env.LOG_LEVEL = "silent";
 process.env.NETWORK ??= "eip155:84532";
 process.env.FACILITATOR_URL ??= "https://x402.org/facilitator";
 process.env.PAY_TO ??= "0x00000000000000000000000000000000DeadBeef";
