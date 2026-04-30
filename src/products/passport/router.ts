@@ -1,5 +1,5 @@
 import express, { type Request, type Response } from "express";
-import { signClaim } from "./sign.js";
+import { signClaim } from "../../core/sign.js";
 import {
   ensurePassportTables,
   insertBinding,

@@ -9,8 +9,18 @@ import type { Product } from "./core/product.js";
 import { figletProduct } from "./products/graphics/figlet/router.js";
 import { randomProduct } from "./products/random/router.js";
 import { passportProduct } from "./products/passport/router.js";
+import { escrowProduct } from "./products/escrow/router.js";
+import { wireProduct } from "./products/wire/router.js";
+import { agoraProduct } from "./products/agora/router.js";
 
-export const products: Product[] = [figletProduct, randomProduct, passportProduct];
+export const products: Product[] = [
+  figletProduct,
+  randomProduct,
+  passportProduct,
+  escrowProduct,
+  wireProduct,
+  agoraProduct,
+];
 
 /**
  * Build the umbrella Express app. Exported (and parameterised) so tests
@@ -36,6 +46,11 @@ export function buildApp(productList: Product[] = products): Express {
   // considered for payment.
   app.get("/", buildLandingHandler(productList));
   app.get("/healthz", healthHandler);
+
+  // Parse JSON bodies app-wide (16 KiB cap) so per-product preValidators that
+  // run *before* the router can inspect req.body. Routers' own
+  // express.json() calls become idempotent no-ops on already-parsed requests.
+  app.use(express.json({ limit: "16kb" }));
 
   // Order matters:
   //   1. Per-product analytics (captures request_received and final-status events).
