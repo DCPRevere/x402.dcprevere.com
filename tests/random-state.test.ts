@@ -79,6 +79,20 @@ describe("random/state — sqlite-backed", () => {
       expect(a.ok).toBe(true);
       expect(b.ok).toBe(false);
     });
+
+    // Review item #1: stored deadlines that are malformed must NOT be
+    // treated as "in the past" (which would let revealers slip through).
+    it("treats malformed stored deadline as not-yet-expired", () => {
+      const c = createCommit({
+        commitment: commitFor("v", "s"),
+        deadline: "not-a-date",
+      });
+      const r = revealCommit(c.id, "v", "s");
+      // Should NOT silently fail with "deadline passed" — the deadline check
+      // bails out for unparsable values, and the commitment is valid, so the
+      // reveal succeeds.
+      expect(r.ok).toBe(true);
+    });
   });
 
   describe("seal", () => {
@@ -103,6 +117,28 @@ describe("random/state — sqlite-backed", () => {
       const seal = createSeal({ ciphertext: "abc", unlock_kind: "block_height", unlock_value: "100" });
       expect(tryUnlockSeal(seal.id, { currentBlock: 50n })?.state).toBe("sealed");
       expect(tryUnlockSeal(seal.id, { currentBlock: 100n })?.state).toBe("unlocked");
+    });
+
+    // Review item #2: second concurrent tryUnlockSeal returns the already-
+    // unlocked row idempotently rather than racing to a duplicate UPDATE.
+    it("second tryUnlockSeal returns the already-unlocked row idempotently", () => {
+      const past = new Date(Date.now() - 1_000).toISOString();
+      const seal = createSeal({ ciphertext: "abc", unlock_kind: "timestamp", unlock_value: past });
+      const a = tryUnlockSeal(seal.id);
+      const b = tryUnlockSeal(seal.id);
+      expect(a?.state).toBe("unlocked");
+      expect(b?.state).toBe("unlocked");
+      expect(b?.unlock_key).toBe(a?.unlock_key);
+    });
+
+    it("malformed unlock_value does not crash tryUnlockSeal", () => {
+      const seal = createSeal({
+        ciphertext: "abc",
+        unlock_kind: "block_height",
+        unlock_value: "not-a-number",
+      });
+      const r = tryUnlockSeal(seal.id, { currentBlock: 100n });
+      expect(r?.state).toBe("sealed");
     });
   });
 

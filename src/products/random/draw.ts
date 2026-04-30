@@ -188,15 +188,29 @@ export function drawExponential(seed: Seed, lambda: number, count: number): numb
   return out;
 }
 
+/**
+ * Poisson sampler. Uses Knuth's method for small lambda, which works well
+ * up to ~lambda=30 in double precision. Above that, e^-lambda underflows
+ * and the method silently returns garbage, so we cap upstream in the
+ * validator (review item #4).
+ */
+const POISSON_KNUTH_MAX_LAMBDA = 30;
+
 export function drawPoisson(seed: Seed, lambda: number, count: number): number[] {
   if (lambda <= 0) throw new Error("drawPoisson: lambda must be positive");
+  if (lambda > POISSON_KNUTH_MAX_LAMBDA) {
+    throw new Error(
+      `drawPoisson: lambda must be <= ${POISSON_KNUTH_MAX_LAMBDA} (Knuth method underflow above)`,
+    );
+  }
   const out: number[] = [];
   for (let i = 0; i < count; i++) {
-    // Knuth's method.
     const L = Math.exp(-lambda);
     let k = 0;
     let p = 1;
     let counter = 0;
+    // Iteration cap is loose insurance against L=0 weirdness; with the
+    // lambda cap above this should never fire.
     while (p > L) {
       const u = Math.max(uniformFloat(seed, i * 1000 + counter, "poisson"), 1e-12);
       p *= u;
@@ -208,6 +222,8 @@ export function drawPoisson(seed: Seed, lambda: number, count: number): number[]
   }
   return out;
 }
+
+export { POISSON_KNUTH_MAX_LAMBDA };
 
 /** dnd "4d6kh3" — roll N dice of S sides, optionally keep highest/lowest K. */
 export function drawDnd(

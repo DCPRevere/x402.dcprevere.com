@@ -1,4 +1,6 @@
 import express, { type Express } from "express";
+import cors from "cors";
+import rateLimit from "express-rate-limit";
 import { config } from "./core/config.js";
 import { buildLandingHandler, healthHandler } from "./core/landing.js";
 import { buildPaymentMiddleware } from "./core/payment.js";
@@ -30,6 +32,28 @@ export function buildApp(productList: Product[] = products): Express {
   const app = express();
   app.disable("x-powered-by");
 
+  // Trust the first proxy hop so req.ip reflects the original client and
+  // express-rate-limit can key on it correctly behind Railway/Fly's proxy.
+  app.set("trust proxy", 1);
+
+  // CORS — agents using browser-side fetch wrappers need permissive CORS
+  // for response-header access. Public, read-only API. Fixes review item #28.
+  //
+  // We do NOT let cors() short-circuit OPTIONS, because /help uses OPTIONS
+  // as a help-discovery verb (see helpMiddleware). Setting `preflightContinue:
+  // true` makes cors() set the headers and call next(); the help middleware
+  // then handles the OPTIONS response. Real browser preflights still get
+  // valid CORS headers via the same path.
+  const corsMiddleware = cors({
+    origin: true,
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "X-PAYMENT", "X-Wire-Owner-Token", "If-None-Match"],
+    exposedHeaders: ["PAYMENT-REQUIRED", "PAYMENT-RESPONSE", "Link", "ETag"],
+    maxAge: 600,
+    preflightContinue: true,
+  });
+  app.use(corsMiddleware);
+
   // Reset registry per app instance — important for test runs that build
   // multiple apps with different product lists.
   helpRegistry.clear();
@@ -47,10 +71,32 @@ export function buildApp(productList: Product[] = products): Express {
   app.get("/", buildLandingHandler(productList));
   app.get("/healthz", healthHandler);
 
-  // Parse JSON bodies app-wide (16 KiB cap) so per-product preValidators that
-  // run *before* the router can inspect req.body. Routers' own
-  // express.json() calls become idempotent no-ops on already-parsed requests.
+  // Parse JSON and (defensively) urlencoded bodies app-wide. 16 KiB cap on
+  // both. Per-product preValidators run *before* the router and need
+  // req.body parsed, hence the app-level placement (review item #29).
   app.use(express.json({ limit: "16kb" }));
+  app.use(express.urlencoded({ limit: "16kb", extended: false }));
+
+  // Rate-limit free routes per IP. Paid routes self-limit via the cost of
+  // payment; free routes (catalog, GETs, polls) need explicit protection
+  // (review item #16). 120 req/min/IP = 2 rps sustained which is generous
+  // for honest agents and slow enough to make a $0 DDoS unattractive.
+  // Disabled in tests so suites that hammer endpoints don't flake.
+  if (process.env.NODE_ENV !== "test") {
+    const freeRouteLimiter = rateLimit({
+      windowMs: 60_000,
+      limit: 120,
+      standardHeaders: "draft-7",
+      legacyHeaders: false,
+      skip: (req) => {
+        if (req.path === "/healthz") return true;
+        if (req.method !== "GET" && req.header("x-payment")) return true;
+        return false;
+      },
+      message: { error: "rate limit exceeded; slow down or pay" },
+    });
+    app.use(freeRouteLimiter);
+  }
 
   // Order matters:
   //   1. Per-product analytics (captures request_received and final-status events).

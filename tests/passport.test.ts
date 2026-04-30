@@ -15,7 +15,8 @@ import {
   setVerifierForTesting,
 } from "../src/products/passport/router.js";
 import { resetSecretForTesting, verifyClaim } from "../src/core/sign.js";
-import { mineSolution, checkSolution } from "../src/products/passport/captcha.js";
+import { checkSolution } from "../src/products/passport/captcha.js";
+import { mineSolution } from "./helpers/mine.js";
 
 function freshApp(): Express {
   const app = express();

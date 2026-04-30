@@ -18,6 +18,7 @@ import {
   listBarLinesSince,
   listBarLinesRecent,
   pruneBarLines,
+  countBarLinesBySpeakerSince,
   type AuctionRow,
 } from "./state.js";
 import { agoraHelp } from "./help.js";
@@ -28,7 +29,12 @@ const SLUG = "agora";
 const BOARD_BODY_MAX = 512;
 const BAR_LINE_MAX = 256;
 const BAR_KEEP = 5000;
+const BAR_PRUNE_EVERY = 100;
+const BAR_PER_SPEAKER_LIMIT = 60;
+const BAR_PER_SPEAKER_WINDOW_MS = 60_000;
 const AUCTION_DESCRIPTION_MAX = 1024;
+
+let barInsertCounter = 0;
 
 // ----- Pluggable clock (tests inject) ---------------------------------
 
@@ -250,7 +256,13 @@ function auctionGetHandler(req: Request, res: Response) {
   if (auction.state !== "bidding") {
     bids = listBids(auction.id);
   }
-  res.json({ auction, bids });
+  // Fix #10: finalized auctions also surface the signed attestation, so
+  // anyone (not just whoever called /finalize) can fetch the receipt.
+  const body: Record<string, unknown> = { auction, bids };
+  if (auction.state === "finalized") {
+    body.attestation = attestationFor(auction);
+  }
+  res.json(body);
 }
 
 function auctionBidHandler(req: Request, res: Response) {
@@ -370,26 +382,34 @@ function auctionFinalizeHandler(req: Request, res: Response) {
     res.status(404).json({ error: "no such auction" });
     return;
   }
+  if (auction.state === "finalized") {
+    res.status(200).json({ auction, attestation: attestationFor(auction) });
+    return;
+  }
   const now = clock();
-  if (auction.state === "bidding" && Date.parse(auction.bid_deadline) <= now.getTime()) {
-    setAuctionState(auction.id, "revealing");
-  }
-  const refreshed = getAuction(auction.id)!;
-  if (refreshed.state === "finalized") {
-    res.status(200).json({ auction: refreshed, attestation: attestationFor(refreshed) });
+  // Fix #8: don't mutate state on a path that's about to 400. Only flip
+  // bidding → revealing if both (a) bid_deadline passed AND (b) we're on
+  // a path that genuinely needs the new state. Finalize doesn't, so we
+  // peek-only here.
+  const bidWindowOver = Date.parse(auction.bid_deadline) <= now.getTime();
+  const revealWindowOver = Date.parse(auction.reveal_deadline) <= now.getTime();
+  if (auction.state === "bidding" && !bidWindowOver) {
+    res.status(400).json({ error: `auction is bidding, cannot finalize` });
     return;
   }
-  if (refreshed.state !== "revealing") {
-    res.status(400).json({ error: `auction is ${refreshed.state}, cannot finalize` });
-    return;
-  }
-  if (Date.parse(refreshed.reveal_deadline) > now.getTime()) {
+  if (!revealWindowOver) {
     res.status(400).json({
       error: "reveal window still open",
-      detail: `now ${now.toISOString()} < reveal_deadline ${refreshed.reveal_deadline}`,
+      detail: `now ${now.toISOString()} < reveal_deadline ${auction.reveal_deadline}`,
     });
     return;
   }
+  // Bid window over AND reveal window over: it's safe to advance state if
+  // we haven't already.
+  if (auction.state === "bidding") {
+    setAuctionState(auction.id, "revealing");
+  }
+  const refreshed = getAuction(auction.id)!;
 
   const bids = listBids(refreshed.id);
   const valid = bids.filter((b) => b.state === "revealed" && b.amount_usdc !== null);
@@ -440,8 +460,24 @@ function barSayHandler(req: Request, res: Response) {
     res.status(400).json({ error: `line required, max ${BAR_LINE_MAX} chars` });
     return;
   }
+  // Per-speaker fairness quota (review item #24): a single wallet can't
+  // monopolise the bar's rolling buffer. The buyer paid $0.001 to send,
+  // so we 429 instead of dropping silently.
+  const since = new Date(clock().getTime() - BAR_PER_SPEAKER_WINDOW_MS).toISOString();
+  if (countBarLinesBySpeakerSince(speaker, since) >= BAR_PER_SPEAKER_LIMIT) {
+    res.status(429).json({
+      error: "bar quota exceeded",
+      detail: `max ${BAR_PER_SPEAKER_LIMIT} lines per ${BAR_PER_SPEAKER_WINDOW_MS / 1000}s per speaker`,
+    });
+    return;
+  }
   const inserted = insertBarLine({ speaker, line });
-  pruneBarLines(BAR_KEEP);
+  // Amortise pruning (review item #9): once every BAR_PRUNE_EVERY says,
+  // not on every single insert.
+  barInsertCounter += 1;
+  if (barInsertCounter % BAR_PRUNE_EVERY === 0) {
+    pruneBarLines(BAR_KEEP);
+  }
   res.status(201).json({ line: inserted });
 }
 

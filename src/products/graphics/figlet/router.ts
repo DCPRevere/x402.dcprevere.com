@@ -42,7 +42,7 @@ async function renderHandler(_req: Request, res: Response) {
       res.locals as { analytics?: { distinctId: string } }
     ).analytics?.distinctId;
     if (distinctId) {
-      capture(distinctId, "product_rendered", {
+      capture(distinctId, "product_delivered", {
         product: SLUG,
         font: input.font,
         text_length: input.text.length,

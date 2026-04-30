@@ -320,3 +320,16 @@ export function pruneBarLines(keep: number): number {
     .run(keep);
   return result.changes;
 }
+
+/**
+ * Per-speaker line count over the last `windowMs` ms. Used to enforce a
+ * fairness quota so a single chatty wallet can't monopolise the bar buffer.
+ *
+ * Fixes review item #24.
+ */
+export function countBarLinesBySpeakerSince(speaker: string, sinceIso: string): number {
+  const row = getDb()
+    .prepare(`SELECT COUNT(*) AS n FROM agora_bar_lines WHERE speaker = ? AND spoken_at >= ?`)
+    .get(speaker.toLowerCase(), sinceIso) as { n: number };
+  return row.n;
+}

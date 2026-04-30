@@ -113,7 +113,8 @@ function validateConditionValue(kind: EscrowConditionKind, value: string): boole
     case "passport_binding":
       return parsePassportSelector(value) !== null;
     case "commit_revealed":
-      return /^[0-9a-f-]{8,}$/i.test(value);
+      // UUID v4 format expected.
+      return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
   }
 }
 
@@ -146,10 +147,27 @@ function createHandler(_req: Request, res: Response) {
   res.status(201).json({ escrow: row });
 }
 
+/**
+ * Read an escrow. If the escrow has been resolved (released or refunded) we
+ * also re-derive the signed attestation so a recipient who lost their
+ * release-time response can still produce a verifiable receipt — the
+ * attestation depends only on row state, so this is deterministic and the
+ * signature matches the one returned at release time.
+ *
+ * Fixes review item #10.
+ */
 function getHandler(req: Request, res: Response) {
   const row = getEscrow(req.params.id);
   if (!row) {
     res.status(404).json({ error: "no such escrow" });
+    return;
+  }
+  if (row.state === "released") {
+    res.json({ escrow: row, attestation: signEscrowAttestation(row, "release") });
+    return;
+  }
+  if (row.state === "refunded") {
+    res.json({ escrow: row, attestation: signEscrowAttestation(row, "refund") });
     return;
   }
   res.json({ escrow: row });

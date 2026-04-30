@@ -300,5 +300,61 @@ describe("/escrow", () => {
       const res = await request(app).post("/escrow/00000000-0000-0000-0000-000000000000/release");
       expect(res.status).toBe(404);
     });
+
+    // Review item #10: GET on a resolved escrow re-derives the attestation
+    // so a recipient who lost the release-time response can still produce
+    // a verifiable receipt.
+    it("GET on a released escrow re-derives the attestation", async () => {
+      const after = new Date("2030-06-01T00:00:00Z");
+      const app = freshApp(after);
+      const created = await request(app).post("/escrow/create").send(validBody());
+      const released = await request(app).post(`/escrow/${created.body.escrow.id}/release`);
+      expect(released.status).toBe(200);
+      const fetched = await request(app).get(`/escrow/${created.body.escrow.id}`);
+      expect(fetched.status).toBe(200);
+      expect(fetched.body.attestation.signature).toBe(released.body.attestation.signature);
+      expect(verifyClaim(fetched.body.attestation.claim, fetched.body.attestation.signature)).toBe(
+        true,
+      );
+    });
+
+    it("GET on a refunded escrow re-derives the attestation", async () => {
+      const after = new Date("2031-01-01T00:00:00Z");
+      const app = freshApp(after);
+      const created = await request(app).post("/escrow/create").send(validBody());
+      await request(app).post(`/escrow/${created.body.escrow.id}/refund`);
+      const fetched = await request(app).get(`/escrow/${created.body.escrow.id}`);
+      expect(fetched.body.attestation.claim.resolution).toBe("refund");
+      expect(verifyClaim(fetched.body.attestation.claim, fetched.body.attestation.signature)).toBe(
+        true,
+      );
+    });
+
+    // Review item #25: condition_value validation is strict for commit_revealed.
+    it("rejects commit_revealed condition_value that's not a UUID", async () => {
+      const app = freshApp();
+      const res = await request(app)
+        .post("/escrow/create")
+        .send(
+          validBody({
+            condition_kind: "commit_revealed",
+            condition_value: "not-a-uuid",
+          }),
+        );
+      expect(res.status).toBe(400);
+    });
+
+    it("accepts commit_revealed condition_value that's a UUID", async () => {
+      const app = freshApp();
+      const res = await request(app)
+        .post("/escrow/create")
+        .send(
+          validBody({
+            condition_kind: "commit_revealed",
+            condition_value: "11111111-2222-3333-4444-555555555555",
+          }),
+        );
+      expect(res.status).toBe(201);
+    });
   });
 });

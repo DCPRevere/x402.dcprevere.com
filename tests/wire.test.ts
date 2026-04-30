@@ -52,13 +52,23 @@ describe("/wire", () => {
       expect(res.status).toBe(400);
     });
 
-    it("does not leak owner_secret in GET", async () => {
+    it("does not leak owner_token_hash or owner_secret in GET", async () => {
       const app = freshApp();
       const { id } = await makeInbox(app);
       const res = await request(app).get(`/wire/inbox/${id}`);
       expect(res.status).toBe(200);
+      expect(res.body.inbox.owner_token_hash).toBeUndefined();
       expect(res.body.inbox.owner_secret).toBeUndefined();
       expect(res.body.queued).toBe(0);
+    });
+
+    // Review item #13: token is stored hashed, so a DB dump doesn't reveal
+    // any owner_token. The hash must NOT appear in any response either.
+    it("never echoes the stored token hash", async () => {
+      const app = freshApp();
+      const { token } = await makeInbox(app);
+      // The token returned to the caller is the raw token.
+      expect(token).toMatch(/^[0-9a-f]{64}$/);
     });
 
     it("returns 404 for unknown inbox", async () => {

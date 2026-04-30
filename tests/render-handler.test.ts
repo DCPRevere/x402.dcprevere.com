@@ -45,14 +45,14 @@ describe("figlet renderHandler", () => {
     expect(res.text.split("\n").length).toBeGreaterThan(1);
   });
 
-  it("emits a product_rendered analytics event with the right shape", async () => {
+  it("emits a product_delivered analytics event with the right shape", async () => {
     const events: { event: string; props: Record<string, unknown> }[] = [];
     vi.spyOn(analytics, "capture").mockImplementation((_id, event, props) => {
       events.push({ event, props: props ?? {} });
     });
     const app = appWithRouter();
     await request(app).get("/graphics/figlet/render?text=hi");
-    const rendered = events.find((e) => e.event === "product_rendered");
+    const rendered = events.find((e) => e.event === "product_delivered");
     expect(rendered).toBeDefined();
     expect(rendered!.props.product).toBe("graphics/figlet");
     expect(rendered!.props.font).toBe("Standard");

@@ -2,17 +2,25 @@ import crypto from "node:crypto";
 import { canonicalJson } from "./help.js";
 
 /**
- * Server-signed attestations.
+ * Server-issued attestation MACs.
  *
- * Used by /passport (bindings, anti-captcha passes), /escrow (release/refund
- * receipts), /agora/auction (auction-result attestations), and any future
- * product that needs to issue verifiable receipts to downstream consumers.
+ * Used by /passport, /escrow, /agora/auction (and any future product) to
+ * issue verifiable receipts to downstream consumers.
  *
- * Uses HMAC-SHA256 with SIGNING_SECRET (or legacy PASSPORT_SECRET, or a
- * per-process random default for dev/test). HMAC is sufficient because
- * there's a single trusted issuer (this server). For cross-server verification
- * swap to EIP-712 signatures with a configured EOA.
+ * This is HMAC-SHA256, not a public-key signature: the server is the only
+ * issuer. Functions are named `attestMac` / `verifyMac` for honesty (review
+ * item #19); `signClaim` / `verifyClaim` are kept as legacy aliases.
+ *
+ * Every claim is wrapped in a `{claim_version: N, payload: {...}}` envelope
+ * so we can change a payload's meaning without producing colliding MACs
+ * across schema versions (review item #18).
+ *
+ * Reads SIGNING_SECRET (or legacy PASSPORT_SECRET, or a per-process random
+ * default for dev/test). For cross-server verification, swap to EIP-712 with
+ * a configured EOA private key.
  */
+
+export const CLAIM_VERSION = 1;
 
 let cachedSecret: Buffer | null = null;
 
@@ -33,15 +41,31 @@ export function resetSecretForTesting(secret?: string): void {
   cachedSecret = secret ? Buffer.from(secret, "utf8") : null;
 }
 
-export function signClaim(payload: Record<string, unknown>): string {
-  const json = canonicalJson(payload);
-  const mac = crypto.createHmac("sha256", getSecret()).update(json).digest("hex");
-  return mac;
+interface VersionedClaim {
+  claim_version: number;
+  payload: Record<string, unknown>;
 }
 
-export function verifyClaim(payload: Record<string, unknown>, signature: string): boolean {
-  const expected = signClaim(payload);
-  // Constant-time compare.
-  if (expected.length !== signature.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(signature, "hex"));
+function envelope(payload: Record<string, unknown>): VersionedClaim {
+  return { claim_version: CLAIM_VERSION, payload };
 }
+
+export function attestMac(payload: Record<string, unknown>): string {
+  const json = canonicalJson(envelope(payload));
+  return crypto.createHmac("sha256", getSecret()).update(json).digest("hex");
+}
+
+export function verifyMac(payload: Record<string, unknown>, mac: string): boolean {
+  const expected = attestMac(payload);
+  if (expected.length !== mac.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(mac, "hex"));
+  } catch {
+    return false;
+  }
+}
+
+// Legacy aliases — kept so existing callers and tests keep working without
+// having to touch every site at once.
+export const signClaim = attestMac;
+export const verifyClaim = verifyMac;

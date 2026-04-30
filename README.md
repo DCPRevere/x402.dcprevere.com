@@ -134,9 +134,12 @@ x402.dcprevere.com/
 │       ├── graphics/
 │       │   └── figlet/           # /graphics/figlet — live
 │       ├── random/               # /random — live
-│       └── passport/             # /passport — live
+│       ├── passport/             # /passport — live
+│       ├── escrow/               # /escrow — live
+│       ├── wire/                 # /wire — live
+│       └── agora/                # /agora — live
 ├── buyer/                        # autonomous-buyer demo CLI
-└── tests/                        # vitest, 118+ tests
+└── tests/                        # vitest, 220+ tests
 ```
 
 ## Network
@@ -162,11 +165,11 @@ No code changes.
 | `FACILITATOR_URL`     | `https://x402.org/facilitator`       | Free for testnet; CDP for mainnet            |
 | `PAY_TO`              | **required, no default**             | One shared receiver wallet for all products  |
 | `DATABASE_PATH`       | `./data/x402.db`                     | sqlite file; `:memory:` is supported         |
-| `RPC_URL`             | (viem default for the chain)         | Base RPC for blockhash-seeded randomness     |
+| `RPC_URL`             | (viem default for the chain)         | Base RPC for ENS resolution + blockhash-seeded sortition |
 | `PUBLIC_BASE_URL`     | (relative URLs in /help)             | When set, /help emits absolute URLs          |
 | `POSTHOG_KEY`         | (unset)                              | Analytics is a no-op when unset              |
 | `POSTHOG_HOST`        | `https://us.i.posthog.com`           |                                              |
-| `PASSPORT_SECRET`     | (per-process random)                 | HMAC key for /passport attestations          |
+| `SIGNING_SECRET`      | (per-process random; legacy `PASSPORT_SECRET` accepted) | HMAC key for /passport, /escrow, /agora attestations |
 | `OPERATOR_CONTACT`    | `ops@x402.dcprevere.com`             | Surfaced in /help                            |
 | `STATUS_PAGE_URL`     | (empty)                              | Surfaced in /help                            |
 | `TOS_URL`             | (empty)                              | Surfaced in /help                            |
@@ -174,6 +177,16 @@ No code changes.
 Per-route prices are declared in code (each product's `help.ts`), not
 env, so the umbrella can host products at different price points without
 config drift between the catalog and the paywall.
+
+### Scaling
+
+The umbrella currently runs as **one process** with a single sqlite handle
+in WAL mode. WAL across multiple processes against the same sqlite file
+risks corruption, so when deploying to Railway/Fly the replica count must
+stay at 1. The volume mount holds `./data/x402.db`. Move to Postgres if
+horizontal scaling becomes necessary; the only stateful module is
+`src/core/persist.ts` and each product's migrations are namespaced
+(`escrow_*`, `wire_*`, `agora_*`, etc.) to make a port mechanical.
 
 ## Running locally
 

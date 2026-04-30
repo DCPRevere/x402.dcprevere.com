@@ -1,5 +1,5 @@
 import type { Request } from "express";
-import type { DrawSpec } from "./draw.js";
+import { POISSON_KNUTH_MAX_LAMBDA, type DrawSpec } from "./draw.js";
 
 const MAX_COUNT = 256;
 const MAX_BYTES = 256;
@@ -180,6 +180,9 @@ function parseDistribution(
   if (kind === "exponential" || kind === "poisson") {
     const lambda = Number(q.lambda ?? "1");
     if (!Number.isFinite(lambda) || lambda <= 0) return new Error("lambda must be > 0");
+    if (kind === "poisson" && lambda > POISSON_KNUTH_MAX_LAMBDA) {
+      return new Error(`poisson lambda must be <= ${POISSON_KNUTH_MAX_LAMBDA}`);
+    }
     return { kind: kind as "exponential" | "poisson", lambda };
   }
   return new Error(`unknown distribution: ${kind}`);

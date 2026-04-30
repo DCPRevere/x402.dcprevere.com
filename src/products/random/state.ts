@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { runMigrations, getDb } from "../../core/persist.js";
+import { isExpired } from "../../core/time.js";
 
 /**
  * Persistence layer shared by /random's stateful sub-endpoints (commit-reveal,
@@ -105,21 +106,33 @@ export function getCommit(id: string): CommitRow | null {
   return row ?? null;
 }
 
-/** Returns true and updates the row to 'revealed' if the preimage matches; false otherwise. */
+/**
+ * Atomically reveal a commit. Uses a conditional UPDATE so two concurrent
+ * reveal calls race correctly: one wins, the other gets `changes === 0` and
+ * sees `commit is revealed` on the next read. Defends against malformed
+ * deadline values via the `isExpired` helper (NaN → not expired → caller
+ * still gets a meaningful response).
+ *
+ * Fixes review items #1 and #2.
+ */
 export function revealCommit(id: string, value: string, salt: string): { ok: true; row: CommitRow } | { ok: false; reason: string } {
   const existing = getCommit(id);
   if (!existing) return { ok: false, reason: "no such commit" };
   if (existing.state !== "committed") return { ok: false, reason: `commit is ${existing.state}` };
-  if (Date.parse(existing.deadline) < Date.now()) return { ok: false, reason: "deadline passed" };
+  if (isExpired(existing.deadline)) return { ok: false, reason: "deadline passed" };
   const preimage = Buffer.concat([Buffer.from(value, "utf8"), Buffer.from(salt, "utf8")]);
   const expected = crypto.createHash("sha256").update(preimage).digest("hex");
   if (expected !== existing.commitment) return { ok: false, reason: "commitment mismatch" };
   const now = new Date().toISOString();
-  getDb()
+  const result = getDb()
     .prepare(
-      `UPDATE random_commits SET state = 'revealed', value = ?, salt = ?, revealed_at = ? WHERE id = ?`,
+      `UPDATE random_commits SET state = 'revealed', value = ?, salt = ?, revealed_at = ?
+        WHERE id = ? AND state = 'committed'`,
     )
     .run(value, salt, now, id);
+  if (result.changes === 0) {
+    return { ok: false, reason: "commit no longer in committed state" };
+  }
   return { ok: true, row: { ...existing, state: "revealed", value, salt, revealed_at: now } };
 }
 
@@ -172,10 +185,14 @@ export function getSeal(id: string): SealRow | null {
 }
 
 /**
- * Evaluate the unlock condition without external state for kinds that don't
- * need it. `block_height` requires the caller to pass a `currentBlock`;
- * `deposit` consults `deposited`. Returns the unlock_key (a hash of the
- * sealed payload + a server salt) when the seal flips.
+ * Evaluate the unlock condition. `block_height` requires the caller to pass
+ * a `currentBlock`; `deposit` consults `deposited`. Returns the unlock_key
+ * (a hash of the sealed payload + a server salt) when the seal flips.
+ *
+ * Concurrent unlocks resolve via a conditional UPDATE so only one caller
+ * commits the state transition; subsequent calls just re-read the row.
+ *
+ * Fixes review items #1 and #2.
  */
 export function tryUnlockSeal(
   id: string,
@@ -186,14 +203,24 @@ export function tryUnlockSeal(
   if (row.state === "unlocked") return row;
 
   let triggered = false;
+  const nowDate = ctx.now ?? new Date();
   if (row.unlock_kind === "timestamp") {
-    triggered = (ctx.now ?? new Date()).getTime() >= Date.parse(row.unlock_value);
+    const target = Date.parse(row.unlock_value);
+    triggered = Number.isFinite(target) && nowDate.getTime() >= target;
   } else if (row.unlock_kind === "block_height") {
     if (ctx.currentBlock !== undefined) {
-      triggered = ctx.currentBlock >= BigInt(row.unlock_value);
+      try {
+        triggered = ctx.currentBlock >= BigInt(row.unlock_value);
+      } catch {
+        triggered = false;
+      }
     }
   } else if (row.unlock_kind === "deposit") {
-    triggered = BigInt(row.deposited) >= BigInt(row.unlock_value);
+    try {
+      triggered = BigInt(row.deposited) >= BigInt(row.unlock_value);
+    } catch {
+      triggered = false;
+    }
   }
   if (!triggered) return row;
 
@@ -201,11 +228,18 @@ export function tryUnlockSeal(
     .createHash("sha256")
     .update("seal-key:" + row.id + ":" + row.ciphertext)
     .digest("hex");
-  const now = new Date().toISOString();
-  getDb()
-    .prepare(`UPDATE random_seals SET state = 'unlocked', unlock_key = ?, unlocked_at = ? WHERE id = ?`)
-    .run(key, now, id);
-  return { ...row, state: "unlocked", unlock_key: key, unlocked_at: now };
+  const nowIso = nowDate.toISOString();
+  const result = getDb()
+    .prepare(
+      `UPDATE random_seals SET state = 'unlocked', unlock_key = ?, unlocked_at = ?
+        WHERE id = ? AND state = 'sealed'`,
+    )
+    .run(key, nowIso, id);
+  if (result.changes === 0) {
+    // Lost a race: re-read and return whatever the DB has now.
+    return getSeal(id);
+  }
+  return { ...row, state: "unlocked", unlock_key: key, unlocked_at: nowIso };
 }
 
 // ----- Sortition ------------------------------------------------------

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { Express, Request, Response, NextFunction } from "express";
 import { config } from "./config.js";
+import { SUPPORTED_NETWORKS } from "./networks.js";
 
 /**
  * Fractal /help system.
@@ -258,7 +259,7 @@ class HelpRegistry {
     };
     const networkMeta: NetworkMeta = {
       default: config.network,
-      supported: ["eip155:84532", "eip155:8453"],
+      supported: [...SUPPORTED_NETWORKS],
     };
 
     const childDepth = opts.depth === undefined ? undefined : Math.max(0, opts.depth - 1);
@@ -357,7 +358,7 @@ class HelpRegistry {
     };
     const networkMeta: NetworkMeta = {
       default: config.network,
-      supported: ["eip155:84532", "eip155:8453"],
+      supported: [...SUPPORTED_NETWORKS],
     };
 
     const productParent: ParentRef = {
@@ -403,7 +404,7 @@ class HelpRegistry {
     };
     const networkMeta: NetworkMeta = {
       default: config.network,
-      supported: ["eip155:84532", "eip155:8453"],
+      supported: [...SUPPORTED_NETWORKS],
     };
     const url = this.absoluteUrl(productMountPath + "/" + endpoint.slug);
     return {

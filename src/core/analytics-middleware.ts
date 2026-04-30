@@ -1,6 +1,13 @@
 import type { Request, Response, NextFunction } from "express";
 import { decodePaymentSignatureHeader } from "@x402/core/http";
-import { capture, hashPayer, newDistinctId, type EventName } from "./analytics.js";
+import {
+  alias,
+  capture,
+  clientFingerprint,
+  hashPayer,
+  newDistinctId,
+  type EventName,
+} from "./analytics.js";
 
 interface AnalyticsLocals {
   distinctId: string;
@@ -34,20 +41,30 @@ export function extractPayerAddress(header: string | undefined): string | null {
 }
 
 /**
- * Per-product analytics middleware factory. Captures request_received on
- * entry and one of payment_required_sent / payment_settled / validation_error
- * / error on response finish, all tagged with the product slug.
+ * Per-product analytics middleware factory.
  *
- * The `distinct_id` is the hashed payer address when an X-PAYMENT header is
- * present, so PostHog can join the unpaid 402 and the paid retry under one
- * identity once the buyer pays. Unpaid first-touch requests get a fresh
- * anonymous id.
+ * Identity strategy (fixes review item #21 — funnel joins):
+ *   - On every request, derive a stable client fingerprint from (IP, UA).
+ *     This is the distinct_id we emit for the unpaid first-touch and any
+ *     subsequent unpaid request.
+ *   - When the paid retry arrives carrying X-PAYMENT, derive the hashed
+ *     payer address and alias the fingerprint id to it. PostHog now treats
+ *     the unpaid 402 and the paid 200 as the same person.
+ *   - All events for the paid retry use the hashed-payer id, so dashboards
+ *     keyed by payer get clean attribution.
  */
 export function analyticsMiddleware(product: string) {
   return function (req: Request, res: Response, next: NextFunction) {
     const paymentHeader = req.header("x-payment");
     const payerAddress = extractPayerAddress(paymentHeader);
-    const distinctId = payerAddress ? hashPayer(payerAddress) : newDistinctId();
+    const fingerprint = clientFingerprint(req.ip, req.header("user-agent"));
+    const distinctId = payerAddress ? hashPayer(payerAddress) : fingerprint;
+
+    if (payerAddress) {
+      // Stitch the prior unpaid request(s) (which were captured under the
+      // fingerprint id) onto the now-known payer hash.
+      alias(distinctId, fingerprint);
+    }
 
     const locals = res.locals as { analytics?: AnalyticsLocals };
     locals.analytics = { distinctId, startedAt: Date.now(), product, payerAddress };
@@ -63,9 +80,9 @@ export function analyticsMiddleware(product: string) {
       const status = res.statusCode;
 
       let event: EventName | null = null;
-      if (status === 402) event = "payment_required_sent";
-      else if (status === 400) event = "validation_error";
-      else if (status >= 500) event = "error";
+      if (status === 402) event = "paywall_returned";
+      else if (status === 400) event = "validation_failed";
+      else if (status >= 500) event = "request_errored";
       else if (status >= 200 && status < 300 && paymentHeader) event = "payment_settled";
 
       if (!event) return;
@@ -80,4 +97,12 @@ export function analyticsMiddleware(product: string) {
 
     next();
   };
+}
+
+/**
+ * Anonymous fingerprinting helper used by tests of the unpaid-first-touch
+ * flow without going through the middleware itself.
+ */
+export function newDistinctIdLegacy(): string {
+  return newDistinctId();
 }

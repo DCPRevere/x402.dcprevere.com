@@ -89,20 +89,23 @@ describe("analyticsMiddleware", () => {
     return { app, captured };
   }
 
-  it("emits request_received and payment_required_sent for an unpaid request", async () => {
+  it("emits request_received and paywall_returned for an unpaid request", async () => {
     const { app, captured } = harness();
     const res = await request(app).get("/figlet/render?text=hi");
     expect(res.status).toBe(402);
     const events = captured.map((c) => c.props._event);
     expect(events).toContain("request_received");
-    expect(events).toContain("payment_required_sent");
+    expect(events).toContain("paywall_returned");
   });
 
-  it("anonymous distinct_id when the request has no X-PAYMENT header", async () => {
+  it("uses a stable client-fingerprint distinct_id when the request has no X-PAYMENT header", async () => {
     const { app, captured } = harness();
     await request(app).get("/figlet/render?text=hi");
     const id = captured[0]?.id ?? "";
-    expect(id).toMatch(/^anon-/);
+    // Per fix #21, unpaid requests get a (IP, UA)-derived fingerprint, not
+    // a fresh-per-request anonymous id, so PostHog can join the unpaid 402
+    // and the eventual paid retry into one funnel.
+    expect(id).toMatch(/^fp-/);
   });
 
   it("uses a stable hashed payer id when X-PAYMENT is present", async () => {
@@ -143,10 +146,10 @@ describe("analyticsMiddleware", () => {
       .get("/figlet/render?text=hi")
       .set("X-PAYMENT", fakePaymentHeader(PAYER));
     expect(captured).toContain("payment_settled");
-    expect(captured).not.toContain("payment_required_sent");
+    expect(captured).not.toContain("paywall_returned");
   });
 
-  it("emits 'validation_error' on 400 and 'error' on 5xx", async () => {
+  it("emits 'validation_failed' on 400 and 'request_errored' on 5xx", async () => {
     const captured: string[] = [];
     vi.spyOn(analytics, "capture").mockImplementation((_id, event) => {
       captured.push(event);
@@ -157,7 +160,7 @@ describe("analyticsMiddleware", () => {
     app.get("/figlet/boom", (_req, res) => res.status(500).send("boom"));
     await request(app).get("/figlet/bad");
     await request(app).get("/figlet/boom");
-    expect(captured).toContain("validation_error");
-    expect(captured).toContain("error");
+    expect(captured).toContain("validation_failed");
+    expect(captured).toContain("request_errored");
   });
 });

@@ -4,19 +4,20 @@ import { runMigrations, getDb } from "../../core/persist.js";
 /**
  * Persistence for /wire — paid messaging inboxes.
  *
- * An inbox is owned by a wallet that holds a server-issued `owner_token`.
- * Senders (anyone) pay to drop messages in. The owner polls to drain the
- * queue. Inboxes can be closed; closed inboxes reject sends with 410.
+ * Owner authentication: on inbox creation we generate a 32-byte token, return
+ * it to the caller, and store *only its sha256 hash* in the DB. A DB dump
+ * doesn't reveal any owner_token, fixing review item #13.
  *
- * Owner authentication uses an HMAC over the inbox id + a per-inbox secret —
- * presented as a bearer token. Server stores only the secret, not the token.
+ * Polling is atomic: the dequeue uses `UPDATE ... WHERE id IN (subquery)
+ * RETURNING *` semantics emulated through a single transaction so two
+ * concurrent pollers can't double-deliver the same messages (review item #23).
  */
 
 export const WIRE_MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS wire_inboxes (
      id            TEXT PRIMARY KEY,
      owner_wallet  TEXT NOT NULL,
-     owner_secret  TEXT NOT NULL,
+     owner_token_hash TEXT NOT NULL,
      state         TEXT NOT NULL CHECK (state IN ('open','closed')),
      created_at    TEXT NOT NULL,
      closed_at     TEXT
@@ -45,11 +46,13 @@ export type InboxState = "open" | "closed";
 export interface InboxRow {
   id: string;
   owner_wallet: string;
-  owner_secret: string;
+  owner_token_hash: string;
   state: InboxState;
   created_at: string;
   closed_at: string | null;
 }
+
+export type PublicInbox = Omit<InboxRow, "owner_token_hash">;
 
 export type MessageState = "queued" | "delivered";
 
@@ -64,19 +67,23 @@ export interface MessageRow {
   delivered_at: string | null;
 }
 
+function hashToken(token: string): string {
+  return crypto.createHash("sha256").update(token, "hex").digest("hex");
+}
+
 export function createInbox(input: { owner_wallet: string }): {
-  inbox: Omit<InboxRow, "owner_secret">;
+  inbox: PublicInbox;
   owner_token: string;
 } {
   const id = crypto.randomUUID();
-  const secret = crypto.randomBytes(32).toString("hex");
+  const owner_token = crypto.randomBytes(32).toString("hex");
   const created_at = new Date().toISOString();
   getDb()
     .prepare(
-      `INSERT INTO wire_inboxes (id, owner_wallet, owner_secret, state, created_at)
+      `INSERT INTO wire_inboxes (id, owner_wallet, owner_token_hash, state, created_at)
        VALUES (?, ?, ?, 'open', ?)`,
     )
-    .run(id, input.owner_wallet.toLowerCase(), secret, created_at);
+    .run(id, input.owner_wallet.toLowerCase(), hashToken(owner_token), created_at);
   return {
     inbox: {
       id,
@@ -85,12 +92,8 @@ export function createInbox(input: { owner_wallet: string }): {
       created_at,
       closed_at: null,
     },
-    owner_token: deriveOwnerToken(id, secret),
+    owner_token,
   };
-}
-
-function deriveOwnerToken(inboxId: string, secret: string): string {
-  return crypto.createHmac("sha256", secret).update(inboxId).digest("hex");
 }
 
 export function getInboxRow(id: string): InboxRow | null {
@@ -101,22 +104,28 @@ export function getInboxRow(id: string): InboxRow | null {
   );
 }
 
-export function getInboxPublic(id: string): Omit<InboxRow, "owner_secret"> | null {
+export function getInboxPublic(id: string): PublicInbox | null {
   const row = getInboxRow(id);
   if (!row) return null;
-  // Strip the secret before returning to a non-owner.
-  const { owner_secret: _omit, ...rest } = row;
-  void _omit;
+  const { owner_token_hash, ...rest } = row;
+  void owner_token_hash; // documented exclusion; intentionally unused
   return rest;
 }
 
 export function authenticateOwner(inboxId: string, presentedToken: string): InboxRow | null {
   const row = getInboxRow(inboxId);
   if (!row) return null;
-  const expected = deriveOwnerToken(row.id, row.owner_secret);
-  if (expected.length !== presentedToken.length) return null;
+  const expectedHash = row.owner_token_hash;
+  let presentedHash: string;
   try {
-    if (!crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(presentedToken, "hex"))) {
+    presentedHash = hashToken(presentedToken);
+  } catch {
+    return null;
+  }
+  try {
+    if (
+      !crypto.timingSafeEqual(Buffer.from(expectedHash, "hex"), Buffer.from(presentedHash, "hex"))
+    ) {
       return null;
     }
   } catch {
@@ -168,21 +177,30 @@ export function countQueued(inboxId: string): number {
   return row.n;
 }
 
+/**
+ * Drain up to `max` queued messages atomically. The SELECT + UPDATE runs in a
+ * single transaction so two concurrent pollers can't both claim the same
+ * rows. Each row is moved from `queued` to `delivered` and returned.
+ */
 export function pollMessages(inboxId: string, max: number): MessageRow[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT * FROM wire_messages WHERE inbox_id = ? AND state = 'queued'
-        ORDER BY queued_at ASC LIMIT ?`,
-    )
-    .all(inboxId, max) as MessageRow[];
-  if (rows.length === 0) return [];
-  const now = new Date().toISOString();
-  const ids = rows.map((r) => r.id);
-  const placeholders = ids.map(() => "?").join(",");
-  getDb()
-    .prepare(
-      `UPDATE wire_messages SET state = 'delivered', delivered_at = ? WHERE id IN (${placeholders})`,
-    )
-    .run(now, ...ids);
-  return rows.map((r) => ({ ...r, state: "delivered" as const, delivered_at: now }));
+  const db = getDb();
+  return db.transaction(() => {
+    const rows = db
+      .prepare(
+        `SELECT * FROM wire_messages WHERE inbox_id = ? AND state = 'queued'
+          ORDER BY queued_at ASC LIMIT ?`,
+      )
+      .all(inboxId, max) as MessageRow[];
+    if (rows.length === 0) return [];
+    const now = new Date().toISOString();
+    const ids = rows.map((r) => r.id);
+    const placeholders = ids.map(() => "?").join(",");
+    db
+      .prepare(
+        `UPDATE wire_messages SET state = 'delivered', delivered_at = ?
+          WHERE id IN (${placeholders}) AND state = 'queued'`,
+      )
+      .run(now, ...ids);
+    return rows.map((r) => ({ ...r, state: "delivered" as const, delivered_at: now }));
+  })();
 }

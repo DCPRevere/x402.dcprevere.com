@@ -109,6 +109,12 @@ describe("random/draw — pure derivations", () => {
       expect(v).toBeGreaterThanOrEqual(0);
     }
   });
+
+  // Review item #4: lambda above the Knuth method's safe range must throw
+  // rather than silently iterate to the cap and return garbage.
+  it("drawPoisson rejects lambda above the safe range", () => {
+    expect(() => drawPoisson(fixedSeed, 100, 1)).toThrow();
+  });
 });
 
 describe("random/draw — validator", () => {

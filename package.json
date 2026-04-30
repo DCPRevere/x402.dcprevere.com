@@ -18,19 +18,22 @@
     "buyer": "tsx buyer/pay.ts"
   },
   "dependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@x402/core": "^2.11.0",
     "@x402/evm": "^2.11.0",
     "@x402/express": "^2.11.0",
     "@x402/fetch": "^2.11.0",
     "better-sqlite3": "^12.9.0",
+    "cors": "^2.8.6",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
+    "express-rate-limit": "^8.4.1",
     "figlet": "^1.8.0",
     "posthog-node": "^4.2.0",
     "viem": "^2.39.3"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/cors": "^2.8.19",
     "@types/express": "^4.17.21",
     "@types/figlet": "^1.7.0",
     "@types/node": "^22.0.0",

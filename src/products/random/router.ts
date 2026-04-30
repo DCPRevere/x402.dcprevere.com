@@ -15,6 +15,8 @@ import {
   type DrawSpec,
   type DrawResult,
 } from "./draw.js";
+import { getBlockHash } from "../../core/chain.js";
+import { isFuture } from "../../core/time.js";
 import { validateDrawInput } from "./validate-draw.js";
 import {
   ensureRandomTables,
@@ -167,21 +169,20 @@ function commitCreateHandler(req: Request, res: Response) {
   const deadline = typeof body.deadline === "string" ? body.deadline : "";
   const label = typeof body.label === "string" ? body.label : undefined;
 
-  if (!/^0x?[0-9a-fA-F]{64}$/.test(commitment.replace(/^0x/, ""))) {
-    res.status(400).json({ error: "commitment must be 32 bytes of hex (with optional 0x)" });
+  // Strip optional 0x prefix, then require exactly 64 hex chars (32 bytes).
+  // Fixes review item #3.
+  const commitmentClean = commitment.replace(/^0x/, "");
+  if (!/^[0-9a-fA-F]{64}$/.test(commitmentClean)) {
+    res.status(400).json({ error: "commitment must be 32 bytes of hex (with optional 0x prefix)" });
     return;
   }
-  if (!Number.isFinite(Date.parse(deadline))) {
-    res.status(400).json({ error: "deadline must be an ISO 8601 timestamp" });
-    return;
-  }
-  if (Date.parse(deadline) <= Date.now()) {
-    res.status(400).json({ error: "deadline must be in the future" });
+  if (!isFuture(deadline)) {
+    res.status(400).json({ error: "deadline must be an ISO 8601 timestamp in the future" });
     return;
   }
 
   const row = createCommit({
-    commitment: commitment.replace(/^0x/, "").toLowerCase(),
+    commitment: commitmentClean.toLowerCase(),
     deadline,
     label,
   });
@@ -299,7 +300,31 @@ function sortitionRegisterHandler(req: Request, res: Response) {
   res.status(201).json({ ok: true });
 }
 
-function sortitionDrawHandler(req: Request, res: Response) {
+/**
+ * Pluggable seed source for sortition. Production reads
+ * `getBlockHash(draw_at_block)` so the seed is verifiable against chain
+ * state — anyone can re-derive the draw given the pool members and the
+ * historical block hash. Tests inject a fixed-seed source.
+ *
+ * Fixes review item #5.
+ */
+let sortitionSeedFor: (drawAtBlock: number) => Promise<Buffer> = async (drawAtBlock) => {
+  const hash = await getBlockHash(BigInt(drawAtBlock));
+  return Buffer.from(hash.replace(/^0x/, ""), "hex");
+};
+
+export function setSortitionSeedForTesting(fn: (drawAtBlock: number) => Promise<Buffer>): void {
+  sortitionSeedFor = fn;
+}
+
+export function resetSortitionSeedForTesting(): void {
+  sortitionSeedFor = async (drawAtBlock) => {
+    const hash = await getBlockHash(BigInt(drawAtBlock));
+    return Buffer.from(hash.replace(/^0x/, ""), "hex");
+  };
+}
+
+async function sortitionDrawHandler(req: Request, res: Response) {
   const pool = getPool(req.params.id);
   if (!pool) {
     res.status(404).json({ error: "no such pool" });
@@ -314,9 +339,18 @@ function sortitionDrawHandler(req: Request, res: Response) {
     res.status(400).json({ error: `pool has ${members.length} members, need ${pool.count}` });
     return;
   }
-  // Draw uses a fresh seed; in production this would bind to draw_at_block's
-  // hash. The result is recorded so the draw is replayable.
-  const seed = freshSeed();
+  let seed: Buffer;
+  try {
+    seed = await sortitionSeedFor(pool.draw_at_block);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "seed source unavailable";
+    res.status(503).json({
+      error: "could not derive draw seed",
+      detail: msg,
+      retry_when: `block ${pool.draw_at_block} mined`,
+    });
+    return;
+  }
   const shuffled = drawShuffle(seed, members);
   const drawn = shuffled.slice(0, pool.count);
   const updated = recordPoolDraw(pool.id, drawn);
@@ -324,6 +358,7 @@ function sortitionDrawHandler(req: Request, res: Response) {
     pool: updated,
     drawn,
     seed: seed.toString("hex"),
+    seed_source: `block_hash(${pool.draw_at_block})`,
   });
 }
 
@@ -342,7 +377,9 @@ export function randomRouter(): express.Router {
   router.get("/seal/:id", sealGetHandler);
   router.post("/sortition", sortitionCreateHandler);
   router.post("/sortition/:id/register", sortitionRegisterHandler);
-  router.post("/sortition/:id/draw", sortitionDrawHandler);
+  router.post("/sortition/:id/draw", (req, res) => {
+    void sortitionDrawHandler(req, res);
+  });
   return router;
 }
 
@@ -375,6 +412,20 @@ export const randomProduct: Product = {
       path: `/${SLUG}/sortition`,
       price: "$0.10",
       description: "Create a verifiable random selection pool.",
+    },
+    // Fixes review item #6: register/draw were advertised as paid in /help
+    // but had no paywall fire. Now actually charged.
+    {
+      method: "POST",
+      path: `/${SLUG}/sortition/:id/register`,
+      price: "$0.01",
+      description: "Register a wallet for a sortition pool.",
+    },
+    {
+      method: "POST",
+      path: `/${SLUG}/sortition/:id/draw`,
+      price: "$0.05",
+      description: "Trigger the draw at the registered block height.",
     },
   ],
   preValidators: [preValidator],

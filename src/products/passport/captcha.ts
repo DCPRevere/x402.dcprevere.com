@@ -43,11 +43,6 @@ export function countLeadingZeroBits(buf: Buffer): number {
   return bits;
 }
 
-/** A miner used by tests and the buyer demo to produce a valid solution. */
-export function mineSolution(nonce: string, difficulty: number, maxIters = 1_000_000): string {
-  for (let i = 0; i < maxIters; i++) {
-    const candidate = i.toString(16);
-    if (checkSolution(nonce, candidate, difficulty)) return candidate;
-  }
-  throw new Error(`mineSolution: exhausted ${maxIters} attempts at difficulty ${difficulty}`);
-}
+// `mineSolution` moved to tests/helpers/mine.ts (review item #14): the
+// production server has no business shipping a "free wallet pass farmer"
+// utility. The `freshNonce`/`checkSolution` pair is sufficient at runtime.

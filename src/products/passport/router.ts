@@ -12,6 +12,7 @@ import {
 } from "./state.js";
 import { freshNonce, checkSolution } from "./captcha.js";
 import { passportHelp } from "./help.js";
+import { defaultVerifier, type VerifyResult } from "./verify.js";
 import type { Product } from "../../core/product.js";
 
 const SLUG = "passport";
@@ -22,15 +23,10 @@ const CHALLENGE_TTL_MS = 10 * 60 * 1000;
 
 // ----- /passport/bind -------------------------------------------------
 
-interface VerifyResult {
-  verified: boolean;
-  detail: string;
-}
-
 /**
- * Pluggable verifier. Real ENS resolution and HTTP fetches happen here in
- * production; tests inject a mock. The default implementation marks ENS as
- * unverified-but-recorded if no resolver is plumbed, and same for domain/gist.
+ * Verifier hook. Default uses the real ENS/domain/gist verifiers in
+ * verify.ts (review item #17). Tests can swap in a mock with
+ * setVerifierForTesting.
  */
 export type Verifier = (
   wallet: string,
@@ -38,13 +34,14 @@ export type Verifier = (
   anchor_value: string,
 ) => Promise<VerifyResult>;
 
-let verifier: Verifier = async () => ({
-  verified: false,
-  detail: "no verifier configured; binding recorded as unverified",
-});
+let verifier: Verifier = defaultVerifier;
 
 export function setVerifierForTesting(v: Verifier): void {
   verifier = v;
+}
+
+export function resetVerifierForTesting(): void {
+  verifier = defaultVerifier;
 }
 
 async function bindHandler(req: Request, res: Response) {

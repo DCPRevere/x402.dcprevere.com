@@ -315,6 +315,37 @@ describe("/agora", () => {
       expect(res.status).toBe(400);
     });
 
+    // Review item #10: GET on a finalized auction includes the signed
+    // attestation, so anyone (not just whoever called /finalize) can fetch
+    // the receipt.
+    it("GET on a finalized auction includes the attestation", async () => {
+      const app = freshApp();
+      const auc = await request(app).post("/agora/auction/create").send(validAuction());
+      const id = auc.body.auction.id;
+      const c = bidCommitment("5000", "s", ALICE);
+      await request(app).post(`/agora/auction/${id}/bid`).send({ bidder: ALICE, commitment: c });
+      setClockForTesting(() => new Date("2030-06-15T00:00:00Z"));
+      await request(app)
+        .post(`/agora/auction/${id}/reveal`)
+        .send({ bidder: ALICE, amount_usdc: "5000", salt: "s" });
+      setClockForTesting(() => new Date("2030-08-01T00:00:00Z"));
+      const finalised = await request(app).post(`/agora/auction/${id}/finalize`);
+      const fetched = await request(app).get(`/agora/auction/${id}`);
+      expect(fetched.body.attestation.signature).toBe(finalised.body.attestation.signature);
+    });
+
+    // Review item #8: finalize during the bid window must NOT mutate state
+    // before returning 400. Confirm by reading state back.
+    it("400 finalize during bidding does not advance state", async () => {
+      const app = freshApp();
+      const auc = await request(app).post("/agora/auction/create").send(validAuction());
+      const id = auc.body.auction.id;
+      const res = await request(app).post(`/agora/auction/${id}/finalize`);
+      expect(res.status).toBe(400);
+      const state = await request(app).get(`/agora/auction/${id}`);
+      expect(state.body.auction.state).toBe("bidding");
+    });
+
     it("hides the bid book during the bidding phase, exposes during reveal", async () => {
       const app = freshApp();
       const auc = await request(app).post("/agora/auction/create").send(validAuction());
@@ -386,6 +417,26 @@ describe("/agora", () => {
       expect(a.status).toBe(400);
       const b = await request(app).get("/agora/bar?limit=999");
       expect(b.status).toBe(400);
+    });
+
+    // Review item #24: a single chatty wallet can't monopolise the buffer.
+    it("enforces a per-speaker quota of 60 lines/minute", async () => {
+      const app = freshApp();
+      // 60 sayings should succeed.
+      for (let i = 0; i < 60; i++) {
+        const res = await request(app).post("/agora/bar/say").send({ speaker: SELLER, line: `m${i}` });
+        expect(res.status).toBe(201);
+      }
+      // 61st should be 429.
+      const blocked = await request(app)
+        .post("/agora/bar/say")
+        .send({ speaker: SELLER, line: "one too many" });
+      expect(blocked.status).toBe(429);
+      // A different speaker is unaffected.
+      const other = await request(app)
+        .post("/agora/bar/say")
+        .send({ speaker: ALICE, line: "I am new" });
+      expect(other.status).toBe(201);
     });
   });
 });
