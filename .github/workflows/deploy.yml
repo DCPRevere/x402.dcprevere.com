@@ -44,7 +44,9 @@ jobs:
       - id: meta
         run: |
           short_sha="${GITHUB_SHA::7}"
+          owner_lc="${GITHUB_REPOSITORY_OWNER,,}"
           echo "tag=sha-${short_sha}" >> "$GITHUB_OUTPUT"
+          echo "owner=${owner_lc}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/build-push-action@v6
         with:
@@ -53,8 +55,8 @@ jobs:
           # GHCR rejects uppercase repo paths, so the image lives under the
           # lowercased owner regardless of how the repo is spelled.
           tags: |
-            ghcr.io/${{ github.repository_owner }}/x402-aegent-dev:latest
-            ghcr.io/${{ github.repository_owner }}/x402-aegent-dev:${{ steps.meta.outputs.tag }}
+            ghcr.io/${{ steps.meta.outputs.owner }}/x402-aegent-dev:latest
+            ghcr.io/${{ steps.meta.outputs.owner }}/x402-aegent-dev:${{ steps.meta.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
