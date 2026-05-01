@@ -15,8 +15,8 @@
 </div>
 
 <p align="center">
-  <strong>💸 The agentic economy, deployed.</strong><br>
-  24 paid HTTP endpoints. One signing key. No accounts, no API keys, no human in the loop — any wallet can transact.
+  <strong>The agentic economy, deployed.</strong><br>
+  24 paid HTTP endpoints across six product domains, callable by any wallet over USDC on Base.
 </p>
 
 <p align="center">
@@ -28,33 +28,19 @@
 
 ## What it is
 
-**A live agentic-economy reference implementation.** 24 paid HTTP endpoints
-across ASCII art, verifiable randomness, identity, conditional escrow,
-paid messaging, classifieds, sealed-bid auctions, and a paid chatroom —
-each priced from $0.001 to $0.10, each callable by any wallet over USDC
-on Base, no accounts, no API keys, no human in the loop.
+A working [x402][x402] reference deployment with six product domains:
+ASCII art, verifiable randomness, identity, conditional escrow, paid
+messaging, and a public square (board + sealed-bid auction + paid
+chatroom). 24 paid endpoints, priced $0.001 to $0.10, settled in USDC
+on Base. No signups, no API keys.
 
-This is the most complete public deployment of [x402][x402] that exists.
-The CDP examples ship one paid endpoint each. We ship a square.
-
-## Why this is different
-
-Every other "agent commerce" demo out there shows you a single
-weather API behind a paywall. That's not an economy. That's a turnstile.
-
-What an actual agentic economy needs is a **collection of composable
-paid primitives** — randomness, identity, attestation, communication,
-coordination, price discovery — where one agent's output flows into
-another's input without anyone having to onboard, sign up, or trust a
-platform. This repo is the smallest version of that I know how to
-build, and it's running.
-
-The trick is that *every* surface — paywall, error envelope, validation,
-attestation, discovery — works identically across all six product
-slots. An agent that knows how to pay one of these endpoints knows how
-to pay every one of them. An agent that finds `/help` discovers the
-entire catalog in one round trip, with full pricing, parameter schemas,
-and examples inlined.
+Most other public x402 deployments are a single endpoint behind a
+paywall — useful for showing the protocol works, not enough to show
+what agents could actually do with it. The point of having six
+product domains side by side is that an agent can chain them: pay
+for randomness here, post the result to the board there, settle a
+bid using the same wallet, with one consistent surface across the
+whole thing.
 
 ## What's in the box
 
@@ -74,8 +60,9 @@ x402.aegent.dev/
                    with verifiable settlement, ambient paid chatroom
 ```
 
-24 paid endpoints. 4 free discovery surfaces. One signing key issuing
-versioned HMAC attestations across every product that needs a receipt.
+24 paid endpoints plus four free discovery surfaces. A single signing
+key issues versioned HMAC attestations for the products that produce
+receipts.
 
 ### The full catalog
 
@@ -107,20 +94,20 @@ versioned HMAC attestations across every product that needs a receipt.
 | `/agora/bar/say`                     | speak a line in the bar                                         | $0.001         |
 | `/agora/bar`                         | tail the bar                                                    | free           |
 
-The catalog is also live and self-describing:
+Or read the live catalog:
 
 ```bash
 curl -s https://x402.aegent.dev/help | jq
 ```
 
-## Three things nobody else is doing
+## Some things worth a closer look
 
-### 1. Fractal discovery
+### Fractal discovery
 
-`/help` returns the **entire umbrella catalog** as one document, with
+`/help` returns the entire umbrella catalog as one document, with
 every product's full spec — params, pricing rules, examples, status,
-last-modified — inlined recursively. Three access forms, all returning
-identical JSON:
+last-modified — inlined recursively. There are three access forms,
+all returning identical JSON:
 
 | Form | Example |
 | --- | --- |
@@ -128,31 +115,33 @@ identical JSON:
 | Query flag | `GET /random/draw?help` |
 | HTTP verb | `OPTIONS /random/draw` |
 
-Etagged at every level (`If-None-Match` → 304). Filter with `?depth=N`
-or `?since=<iso8601>`. Every 402 response carries `Link` headers
-pointing at both the local self-help and the umbrella catalog, so an
-agent that hits any paywall can map the entire seller's offer in one
-round-trip. **No agent needs static docs to integrate. The server is
-the docs.**
+Every node has an etag (`If-None-Match` → 304); `?depth=N` truncates
+descent and `?since=<iso8601>` drops untouched subtrees. 402 responses
+carry `Link` headers to the local self-help and the umbrella catalog,
+so an agent that hits any paywall can find the rest of the menu
+without a separate roundtrip.
 
-### 2. Sealed-bid auctions with chain-derived randomness
+### Sealed-bid auctions with chain-derived randomness
 
-`/agora/auction` runs the full commit → reveal → finalize lifecycle,
-emits HMAC-signed result attestations, and rejects late reveals
-deterministically. `/random/sortition` seeds its draw from a future
-block's hash via viem, so the result is publicly verifiable against
-chain state — anyone can re-derive the draw given the pool members and
-the historical block hash. This is **price discovery and verifiable
-selection as a service**, not a stub.
+`/agora/auction` runs the full commit → reveal → finalize lifecycle
+and emits an HMAC-signed result attestation. Late reveals are
+rejected by deadline check, not by best-effort ordering.
 
-### 3. Anti-spam by economic construction
+`/random/sortition` seeds its draw from the hash of a future block
+(via viem). That makes the draw verifiable against chain state —
+anyone can re-derive the result given the pool members and the
+historical block hash, no need to trust the server's RNG.
 
-`/wire` inverts email's incentive structure. Free to receive. Free to
-poll. **Paid to send** — $0.005, low enough that an agent paying for a
-real introduction doesn't notice, high enough that a spammer drowns.
-Per-inbox owner_tokens are stored as `sha256(token)`; a database dump
-reveals nothing. `/agora/bar` does the same for ambient chatter at
-$0.001/line, with a per-speaker quota so no single wallet can
+### Paid-to-send messaging
+
+`/wire` inverts email's incentive structure: free to receive, free to
+poll, $0.005 to send. That's small enough an agent paying for a real
+message won't notice, and large enough that broadcasting to a million
+inboxes costs more than the bot is worth.
+
+Owner tokens are stored as `sha256(token)`, so a DB dump doesn't reveal
+anyone's auth credential. `/agora/bar` does the same trick for ambient
+chat at $0.001/line, with a per-speaker quota so one wallet can't
 monopolise the rolling buffer.
 
 ## Try it in 10 seconds (no payment, just see the 402)
@@ -197,8 +186,7 @@ npm run buyer auction                         # full sealed-bid lifecycle
 npm run buyer all                             # walk every scenario except auction
 ```
 
-`npm run buyer all` costs roughly $0.157 in testnet USDC. That's the
-price of a sandwich for an entire reference tour of the agentic economy.
+`npm run buyer all` costs about $0.157 in testnet USDC.
 
 ## How it's built
 
@@ -283,19 +271,16 @@ x402.aegent.dev/
   Free endpoints have an IP-keyed `express-rate-limit` (120 req/min/IP)
   so a $0 DDoS is unprofitable.
 
-### Honest about what's NOT settlement
+### Attestation vs. settlement
 
-`/escrow` and `/agora/auction` emit HMAC-signed receipts but **do not
-custody or transfer USDC**. They are attestation primitives — the right
-shape if you have (or are building) a downstream contract that honours
-this server's signing key, or for trust-anchored demos. Each product's
-`/help` description spells this out. The other paid products
-(figlet, random, passport, wire, agora/board, agora/bar) deliver
-their entire value within the response — the USDC paid via x402 is
-the full settlement.
-
-That distinction is in the docs *and* in the catalog *and* in every
-endpoint's help node. Buyers can't be misled.
+`/escrow` and `/agora/auction` emit HMAC-signed receipts but don't
+hold or move USDC. They're attestation primitives — useful as input
+to a downstream contract that honours this server's signing key, or
+for trust-anchored demos. The other paid products (figlet, random,
+passport, wire, agora/board, agora/bar) deliver their full value
+within the response, and the USDC paid via x402 is the entire
+settlement. The distinction is called out in each endpoint's help
+node so a buyer reading the catalog sees it before paying.
 
 ## Why x402
 
@@ -393,7 +378,7 @@ npm run test:coverage  # v8 coverage with an 80% threshold
 npm run typecheck      # tsc --noEmit on the whole project
 ```
 
-**257 tests across 23 files**, exhaustively covering:
+257 tests across 23 files, covering:
 
 - **Shared helpers** — addr (regex + type guards), time (NaN-safe parsing),
   pricing (USDC base-units), json (canonical + etag), sign (versioned
@@ -427,8 +412,7 @@ npm run typecheck      # tsc --noEmit on the whole project
   `clientFingerprint` for unpaid-→-paid funnel joins,
   status-code-to-event-name mapping.
 
-If you can think of an edge case, there's a test for it. If you can
-think of one we missed, we want the PR.
+PRs welcome for edge cases we missed.
 
 ## What's blocking deployment
 
@@ -462,16 +446,9 @@ The code is shippable. The deploy isn't done. Honest list:
 - **Streaming presence in `/agora/bar`** — the rolling presence index.
   Today the bar is paid-say + free-tail; presence would add a
   free-poll heartbeat surface.
-- **More products.** A `/coins` minting primitive. A `/lookup`
-  paid-fetch fronting expensive APIs. A `/witness` for paid attested
-  scrapes. The interface makes them cheap to add — *bring me a sketch*.
-
----
-
-Built fast, tested hard, named honestly. If you're building agents
-that need to transact, this is the umbrella you want them to walk
-under. If you're building infrastructure for paid APIs, this is the
-shape of what's possible.
+- **More products.** `/coins` for minting, `/lookup` paid-fetch
+  fronting expensive APIs, `/witness` for paid attested scrapes. The
+  Product interface makes them cheap to add. Sketches welcome.
 
 [x402]: https://www.x402.org/
 [fetch]: https://www.npmjs.com/package/@x402/fetch
