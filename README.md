@@ -1,4 +1,4 @@
-# x402.dcprevere.com
+# x402.aegent.dev
 
 A small umbrella of pay-per-call APIs that demonstrate what the agentic
 economy might look like. Every endpoint speaks [x402][x402] over USDC on
@@ -12,7 +12,7 @@ product slots. New ideas land as sub-endpoints under an existing slot
 or motivate a new top-level slot only when none of the others fit.
 
 ```
-x402.dcprevere.com/
+x402.aegent.dev/
 ├── /help          discovery — fractal catalog of everything (free)
 ├── /graphics      generative output (figlet lives here)
 ├── /random        verifiable entropy & sealing primitives
@@ -56,7 +56,7 @@ The live catalog (with full parameter tables, pricing rules, and
 examples) is at `/help`:
 
 ```bash
-curl -s https://x402.dcprevere.com/help | jq
+curl -s https://x402.aegent.dev/help | jq
 ```
 
 ## /help — fractal discovery
@@ -108,7 +108,7 @@ can switch between them without re-onboarding.
 ## Try the paywall (no payment, just see the 402)
 
 ```bash
-curl -i 'https://x402.dcprevere.com/graphics/figlet/render?text=hello'
+curl -i 'https://x402.aegent.dev/graphics/figlet/render?text=hello'
 ```
 
 You'll get back `HTTP 402 Payment Required` with a `PAYMENT-REQUIRED`
@@ -127,7 +127,7 @@ The demo is scenario-based:
 
 ```bash
 export BUYER_PRIVATE_KEY=0x...                # Sepolia-only test wallet
-export X402_URL=http://localhost:4021         # or https://x402.dcprevere.com once deployed
+export X402_URL=http://localhost:4021         # or https://x402.aegent.dev once deployed
 
 npm run buyer figlet "hello agent economy"    # render text          ($0.10)
 npm run buyer random                          # paid die roll        ($0.005)
@@ -144,7 +144,7 @@ npm run buyer all                             # walk every scenario except aucti
 ## Repo layout
 
 ```
-x402.dcprevere.com/
+x402.aegent.dev/
 ├── README.md
 ├── package.json
 ├── Dockerfile                    # node:20-bookworm-slim (glibc for better-sqlite3)
@@ -208,7 +208,7 @@ No code changes.
 | `POSTHOG_KEY`         | (unset)                              | Analytics is a no-op when unset              |
 | `POSTHOG_HOST`        | `https://us.i.posthog.com`           |                                              |
 | `SIGNING_SECRET`      | (per-process random; legacy `PASSPORT_SECRET` accepted) | HMAC key for /passport, /escrow, /agora attestations |
-| `OPERATOR_CONTACT`    | `ops@x402.dcprevere.com`             | Surfaced in /help                            |
+| `OPERATOR_CONTACT`    | `ops@x402.aegent.dev`             | Surfaced in /help                            |
 | `STATUS_PAGE_URL`     | (empty)                              | Surfaced in /help                            |
 | `TOS_URL`             | (empty)                              | Surfaced in /help                            |
 
@@ -300,7 +300,7 @@ Coverage spans:
 The code is shippable; the deploy isn't done. What's pending:
 
 - **No actual deploy.** Dockerfile is correct and the build is clean,
-  but the umbrella isn't running on `x402.dcprevere.com`. Connecting
+  but the umbrella isn't running on `x402.aegent.dev`. Connecting
   Railway/Fly to this repo and CNAMing the subdomain is a 30-minute job.
 - **No mainnet test.** The mainnet flip in [Network](#network) is
   documented but never exercised end-to-end. First live mainnet call

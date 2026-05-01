@@ -36,7 +36,7 @@ export const config = {
   rpcUrl: process.env.RPC_URL ?? "",
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? "",
   operator: {
-    contact: process.env.OPERATOR_CONTACT ?? "ops@x402.dcprevere.com",
+    contact: process.env.OPERATOR_CONTACT ?? "ops@x402.aegent.dev",
     statusPage: process.env.STATUS_PAGE_URL ?? "",
     tos: process.env.TOS_URL ?? "",
   },

@@ -1,6 +1,6 @@
 # buyer demo
 
-An autonomous-agent demo that pays for x402.dcprevere.com endpoints using
+An autonomous-agent demo that pays for x402.aegent.dev endpoints using
 USDC on Base Sepolia. One script, multiple scenarios — pick a single
 product to demo or run them all.
 
@@ -35,7 +35,7 @@ testnet USDC. **Do not reuse a real wallet.**
 
 ```bash
 export BUYER_PRIVATE_KEY=0x...
-export X402_URL=http://localhost:4021       # or https://x402.dcprevere.com
+export X402_URL=http://localhost:4021       # or https://x402.aegent.dev
 
 # Default: render text in figlet (one paid call: $0.10)
 npm run buyer

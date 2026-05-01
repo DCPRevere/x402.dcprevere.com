@@ -21,7 +21,7 @@ describe("/help — fractal catalog", () => {
       const res = await request(app).get("/help");
       const body = res.body;
       expect(body.level).toBe("umbrella");
-      expect(body.name).toBe("x402.dcprevere.com");
+      expect(body.name).toBe("x402.aegent.dev");
       expect(Array.isArray(body.children)).toBe(true);
 
       const figlet = body.children.find(

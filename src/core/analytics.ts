@@ -44,7 +44,7 @@ export function capture(
     distinctId,
     event,
     properties: {
-      service: "x402.dcprevere.com",
+      service: "x402.aegent.dev",
       network: config.network,
       ...properties,
     },

@@ -31,7 +31,7 @@ async function fetchWithTimeout(url: string): Promise<Response> {
     return await fetch(url, {
       signal: controller.signal,
       redirect: "follow",
-      headers: { "User-Agent": "x402.dcprevere.com/passport-verifier" },
+      headers: { "User-Agent": "x402.aegent.dev/passport-verifier" },
     });
   } finally {
     clearTimeout(timer);

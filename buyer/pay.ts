@@ -1,5 +1,5 @@
 /**
- * Autonomous-buyer demo for x402.dcprevere.com.
+ * Autonomous-buyer demo for x402.aegent.dev.
  *
  * Usage:
  *   npm run buyer                   # default: figlet (one paid call)

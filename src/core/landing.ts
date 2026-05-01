@@ -18,7 +18,7 @@ export function buildLandingHandler(products: Product[]) {
       ? `  curl -i '${host}${sample.paidRoutes[0]?.path ?? "/" + sample.slug}'`
       : "";
 
-    const body = `x402.dcprevere.com — pay-per-call APIs for the agentic economy
+    const body = `x402.aegent.dev — pay-per-call APIs for the agentic economy
 ==============================================================
 
 Products (each charges in USDC on Base via x402):

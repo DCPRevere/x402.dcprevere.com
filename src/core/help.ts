@@ -178,7 +178,7 @@ interface RegisteredProduct {
 
 class HelpRegistry {
   private products = new Map<string, RegisteredProduct>();
-  private umbrellaName = "x402.dcprevere.com";
+  private umbrellaName = "x402.aegent.dev";
   private umbrellaDescription =
     "Pay-per-call APIs for the agentic economy. Each product charges in USDC on Base via x402.";
   private umbrellaTags = ["umbrella", "x402"];
